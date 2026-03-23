@@ -1,8 +1,9 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
+import anthropic
 from flask import Flask, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -193,6 +194,133 @@ def annuler_surveillance():
 def list_surveillances():
     actives = [w for w in _watches if not w["notified"]]
     return jsonify({"surveillances": actives})
+
+
+@app.route("/chat")
+def chat():
+    question = request.args.get("q", "").strip()
+    if not question:
+        return jsonify({"error": "Parametre 'q' manquant"}), 400
+
+    today = datetime.now()
+    system_prompt = f"""Tu es un assistant qui gère les réservations de tennis pour JB au club.
+Aujourd'hui nous sommes le {today.strftime('%A %d/%m/%Y')}.
+Demain c'est le {(today + timedelta(days=1)).strftime('%d/%m/%Y')}.
+
+Tu peux :
+- Lister les créneaux disponibles (outil get_creneaux)
+- Réserver un créneau (outil reserver)
+- Surveiller un créneau pour être notifié s'il se libère (outil surveiller)
+
+Réponds toujours en français, de façon concise et naturelle.
+Pour les dates relatives comme "demain", "jeudi", etc., convertis-les en JJ/MM/AAAA.
+Si plusieurs créneaux sont disponibles et que l'utilisateur n'a pas précisé le court, choisis le premier disponible à l'heure demandée."""
+
+    tools = [
+        {
+            "name": "get_creneaux",
+            "description": "Récupère les créneaux de tennis disponibles pour une date donnée.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "Date au format JJ/MM/AAAA"}
+                },
+                "required": ["date"]
+            }
+        },
+        {
+            "name": "reserver",
+            "description": "Réserve un créneau de tennis.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "slot_id": {"type": "string", "description": "ID du créneau (ex: 9_0_4)"},
+                    "date": {"type": "string", "description": "Date au format JJ/MM/AAAA"}
+                },
+                "required": ["slot_id", "date"]
+            }
+        },
+        {
+            "name": "surveiller",
+            "description": "Surveille un créneau et envoie une notification quand il se libère.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "Date au format JJ/MM/AAAA"},
+                    "heure": {"type": "integer", "description": "Heure souhaitée (ex: 14)"}
+                },
+                "required": ["date", "heure"]
+            }
+        }
+    ]
+
+    try:
+        ai = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        messages = [{"role": "user", "content": question}]
+
+        # Boucle agent : Claude appelle les outils jusqu'à avoir la réponse
+        while True:
+            response = ai.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=1024,
+                system=system_prompt,
+                tools=tools,
+                messages=messages,
+            )
+
+            # Pas d'appel d'outil → réponse finale
+            if response.stop_reason == "end_turn":
+                final = next(b.text for b in response.content if hasattr(b, "text"))
+                return jsonify({"reponse": final})
+
+            # Traiter les appels d'outils
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+
+            for block in response.content:
+                if block.type != "tool_use":
+                    continue
+
+                name = block.name
+                args = block.input
+                logger.info(f"Claude appelle {name}({args})")
+
+                try:
+                    if name == "get_creneaux":
+                        client = _get_client()
+                        slots = client.get_creneaux(args["date"])
+                        result = {"date": args["date"], "creneaux": slots}
+                    elif name == "reserver":
+                        client = _get_client()
+                        client.get_creneaux(args["date"])
+                        msg = client.reserver(args["slot_id"], args["date"])
+                        result = {"status": "ok", "message": msg}
+                    elif name == "surveiller":
+                        date_str = args["date"]
+                        heure = str(args["heure"])
+                        for w in _watches:
+                            if w["date"] == date_str and w["heure"] == heure and not w["notified"]:
+                                result = {"status": "ok", "message": f"Surveillance déjà active pour {date_str} à {heure}h"}
+                                break
+                        else:
+                            _watches.append({"date": date_str, "heure": heure, "notified": False})
+                            result = {"status": "ok", "message": f"Surveillance activée pour {date_str} à {heure}h"}
+                    else:
+                        result = {"error": f"Outil inconnu: {name}"}
+                except Exception as e:
+                    result = {"error": str(e)}
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": str(result)
+                })
+
+            messages.append({"role": "user", "content": tool_results})
+
+    except Exception as e:
+        logger.error(f"Erreur /chat: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
