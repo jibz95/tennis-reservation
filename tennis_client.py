@@ -196,6 +196,99 @@ class TennisClient:
         return creneaux
 
     # ------------------------------------------------------------------
+    # Mes réservations
+    # ------------------------------------------------------------------
+
+    def get_reservations(self, date_str: str) -> list[dict]:
+        """Retourne les réservations (idact=330) pour la date donnée."""
+        date_with_day = _date_with_day(date_str)
+        timestamp = int(time.time() * 1000)
+
+        params = {
+            "idact": "328",
+            "idses": "S0",
+            "CHAMP_SELECTEUR_JOUR": date_with_day,
+            "_": str(timestamp),
+        }
+        r = self.session.get(BASE_URL, params=params, timeout=10)
+        r.raise_for_status()
+        js = r.text
+
+        if not self._idpge_planning:
+            match = re.search(r'(210-\w+)', js)
+            if match:
+                self._idpge_planning = match.group(1)
+
+        # idg_pset(Array("H_M_C",idres,"idpro",idact,"type",visible,"COLOR","LABEL",...))
+        reservations = []
+        seen_idres = set()
+        for m in re.finditer(
+            r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+),[^,]+,[^,]+,[^,]+,"([^"]*)"',
+            js
+        ):
+            h, mn, court, idres, idpro, idact = (
+                m.group(1), m.group(2), m.group(3),
+                m.group(4), m.group(5), m.group(6)
+            )
+            label_raw = m.group(7)
+            # Filtrer : idact=330 (réservation), mn=0 (heure pleine), idres>0
+            if idact != "330" or mn != "0" or int(idres) <= 0:
+                continue
+            if idres in seen_idres:
+                continue
+            seen_idres.add(idres)
+            import re as _re
+            label = _re.sub(r'<[^>]+>', '', label_raw).strip()
+            court_name = COURT_NAMES.get(court, f"Court {court}")
+            reservations.append({
+                "slot_id": f"{h}_0_{court}",
+                "idres": idres,
+                "idpro": idpro,
+                "label": f"{court_name} - {h}h ({label})",
+                "heure": f"{h}h",
+                "court": court,
+            })
+
+        return reservations
+
+    # ------------------------------------------------------------------
+    # Annulation
+    # ------------------------------------------------------------------
+
+    def annuler(self, idres: str, idpro: str, date_str: str) -> str:
+        """Annule la réservation identifiée par idres."""
+        if not self._idpge_planning:
+            raise RuntimeError("idpge_planning non disponible — relancer login + get_creneaux")
+
+        # Étape 1 : Ouvrir la fiche de réservation (idact=330)
+        r1 = self.session.post(BASE_URL, data={
+            "idact": "330",
+            "idpge": self._idpge_planning,
+            "IDOBJ": idres,
+            "idpro": idpro,
+            "idses": "S0",
+        }, timeout=10)
+        r1.raise_for_status()
+        html1 = r1.text
+
+        match = re.search(r'(330-\w+)', html1)
+        if not match:
+            raise RuntimeError("idpge 330-xxx introuvable dans la fiche de réservation")
+        idpge_330 = match.group(1)
+
+        # Étape 2 : Confirmer l'annulation (idact=335)
+        r2 = self.session.post(BASE_URL, data={
+            "idact": "335",
+            "idpge": idpge_330,
+            "IDOBJ": idres,
+            "idses": "S0",
+            "b_i": "0",
+        }, timeout=10)
+        r2.raise_for_status()
+
+        return "Annulation confirmee"
+
+    # ------------------------------------------------------------------
     # Réservation
     # ------------------------------------------------------------------
 

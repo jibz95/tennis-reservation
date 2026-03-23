@@ -196,6 +196,57 @@ def annuler_surveillance():
     return jsonify({"status": "ok", "message": f"{removed} surveillance(s) annulee(s)"})
 
 
+@app.route("/reservations")
+def reservations():
+    date_str = request.args.get("date")
+    if not date_str:
+        return jsonify({"error": "Parametre 'date' manquant (format: JJ/MM/AAAA)"}), 400
+    if not _validate_date(date_str):
+        return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+
+    try:
+        client = _get_client()
+        client.get_creneaux(date_str)
+        res = client.get_reservations(date_str)
+        return jsonify({"date": date_str, "reservations": res})
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"error": f"Erreur inattendue: {e}"}), 500
+
+
+@app.route("/annuler", methods=["GET", "POST"])
+def annuler():
+    if request.method == "GET":
+        idres = request.args.get("idres")
+        idpro = request.args.get("idpro")
+        date_str = request.args.get("date")
+    else:
+        body = request.get_json(silent=True) or {}
+        idres = body.get("idres")
+        idpro = body.get("idpro")
+        date_str = body.get("date")
+
+    if not idres:
+        return jsonify({"error": "Champ 'idres' manquant"}), 400
+    if not idpro:
+        return jsonify({"error": "Champ 'idpro' manquant"}), 400
+    if not date_str:
+        return jsonify({"error": "Champ 'date' manquant"}), 400
+    if not _validate_date(date_str):
+        return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+
+    try:
+        client = _get_client()
+        client.get_creneaux(date_str)
+        message = client.annuler(str(idres), str(idpro), date_str)
+        return jsonify({"status": "ok", "message": message})
+    except (RuntimeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"error": f"Erreur inattendue: {e}"}), 500
+
+
 @app.route("/surveillances")
 def list_surveillances():
     actives = [w for w in _watches if not w["notified"]]
@@ -246,8 +297,10 @@ def _parse_heure(text: str) -> int | None:
 
 
 def _parse_action(text: str) -> str:
-    """Détecte l'intention : get_creneaux, reserver ou surveiller."""
+    """Détecte l'intention : get_creneaux, reserver, surveiller ou annuler."""
     t = text.lower()
+    if any(w in t for w in ["annule", "annuler", "supprime", "supprimer", "efface"]):
+        return "annuler"
     if any(w in t for w in ["surveille", "surveiller", "alerte", "notifie", "préviens", "previens", "libère", "libere"]):
         return "surveiller"
     if any(w in t for w in ["réserve", "reserve", "réserver", "reserver", "book", "prend", "prends"]):
@@ -298,6 +351,19 @@ def chat():
                 chosen = slots[0]
                 tennis.reserver(chosen["slot_id"], date_str)
                 result_text = f"Réservation confirmée : {chosen['label']} le {date_str}."
+
+        elif action == "annuler":
+            tennis = _get_client()
+            tennis.get_creneaux(date_str)
+            reservations = tennis.get_reservations(date_str)
+            if heure:
+                reservations = [r for r in reservations if r["heure"] == f"{heure}h"]
+            if not reservations:
+                result_text = f"Aucune réservation à annuler le {date_str}" + (f" à {heure}h." if heure else ".")
+            else:
+                chosen = reservations[0]
+                tennis.annuler(chosen["idres"], chosen["idpro"], date_str)
+                result_text = f"Réservation annulée : {chosen['label']} le {date_str}."
 
         elif action == "surveiller":
             if not heure:
