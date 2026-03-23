@@ -119,11 +119,15 @@ def creneaux():
         return jsonify({"error": f"Erreur inattendue: {e}"}), 500
 
 
-@app.route("/reserver", methods=["POST"])
+@app.route("/reserver", methods=["GET", "POST"])
 def reserver():
-    body = request.get_json(silent=True) or {}
-    slot_id = body.get("slot_id")
-    date_str = body.get("date")
+    if request.method == "GET":
+        slot_id = request.args.get("slot_id")
+        date_str = request.args.get("date")
+    else:
+        body = request.get_json(silent=True) or {}
+        slot_id = body.get("slot_id")
+        date_str = body.get("date")
 
     if not slot_id:
         return jsonify({"error": "Champ 'slot_id' manquant"}), 400
@@ -143,11 +147,15 @@ def reserver():
         return jsonify({"error": f"Erreur inattendue: {e}"}), 500
 
 
-@app.route("/surveiller", methods=["POST"])
+@app.route("/surveiller", methods=["GET", "POST"])
 def surveiller():
-    body = request.get_json(silent=True) or {}
-    date_str = body.get("date")
-    heure = str(body.get("heure", "")).replace("h", "")
+    if request.method == "GET":
+        date_str = request.args.get("date")
+        heure = str(request.args.get("heure", "")).replace("h", "")
+    else:
+        body = request.get_json(silent=True) or {}
+        date_str = body.get("date")
+        heure = str(body.get("heure", "")).replace("h", "")
 
     if not date_str:
         return jsonify({"error": "Champ 'date' manquant (format: JJ/MM/AAAA)"}), 400
