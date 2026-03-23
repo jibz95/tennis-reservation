@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta
 
 import requests
-import anthropic
+import google.generativeai as genai
 from flask import Flask, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -196,6 +196,40 @@ def list_surveillances():
     return jsonify({"surveillances": actives})
 
 
+def _gemini_get_creneaux(date: str) -> dict:
+    """Récupère les créneaux de tennis disponibles pour une date donnée (format JJ/MM/AAAA)."""
+    try:
+        client = _get_client()
+        slots = client.get_creneaux(date)
+        return {"date": date, "creneaux": slots}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _gemini_reserver(slot_id: str, date: str) -> dict:
+    """Réserve un créneau de tennis. slot_id est au format HEURE_0_COURT (ex: 9_0_4). date au format JJ/MM/AAAA."""
+    try:
+        client = _get_client()
+        client.get_creneaux(date)
+        msg = client.reserver(slot_id, date)
+        return {"status": "ok", "message": msg}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _gemini_surveiller(date: str, heure: int) -> dict:
+    """Surveille un créneau et envoie une notification push quand il se libère. date au format JJ/MM/AAAA, heure est un entier (ex: 14)."""
+    try:
+        heure_str = str(heure)
+        for w in _watches:
+            if w["date"] == date and w["heure"] == heure_str and not w["notified"]:
+                return {"status": "ok", "message": f"Surveillance déjà active pour {date} à {heure}h"}
+        _watches.append({"date": date, "heure": heure_str, "notified": False})
+        return {"status": "ok", "message": f"Surveillance activée pour {date} à {heure}h"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.route("/chat")
 def chat():
     question = request.args.get("q", "").strip()
@@ -207,116 +241,21 @@ def chat():
 Aujourd'hui nous sommes le {today.strftime('%A %d/%m/%Y')}.
 Demain c'est le {(today + timedelta(days=1)).strftime('%d/%m/%Y')}.
 
-Tu peux :
-- Lister les créneaux disponibles (outil get_creneaux)
-- Réserver un créneau (outil reserver)
-- Surveiller un créneau pour être notifié s'il se libère (outil surveiller)
-
+Tu peux lister les créneaux disponibles, réserver un créneau, ou surveiller un créneau pour être notifié s'il se libère.
 Réponds toujours en français, de façon concise et naturelle.
 Pour les dates relatives comme "demain", "jeudi", etc., convertis-les en JJ/MM/AAAA.
-Si plusieurs créneaux sont disponibles et que l'utilisateur n'a pas précisé le court, choisis le premier disponible à l'heure demandée."""
-
-    tools = [
-        {
-            "name": "get_creneaux",
-            "description": "Récupère les créneaux de tennis disponibles pour une date donnée.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "date": {"type": "string", "description": "Date au format JJ/MM/AAAA"}
-                },
-                "required": ["date"]
-            }
-        },
-        {
-            "name": "reserver",
-            "description": "Réserve un créneau de tennis.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "slot_id": {"type": "string", "description": "ID du créneau (ex: 9_0_4)"},
-                    "date": {"type": "string", "description": "Date au format JJ/MM/AAAA"}
-                },
-                "required": ["slot_id", "date"]
-            }
-        },
-        {
-            "name": "surveiller",
-            "description": "Surveille un créneau et envoie une notification quand il se libère.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "date": {"type": "string", "description": "Date au format JJ/MM/AAAA"},
-                    "heure": {"type": "integer", "description": "Heure souhaitée (ex: 14)"}
-                },
-                "required": ["date", "heure"]
-            }
-        }
-    ]
+Si l'utilisateur veut réserver sans préciser le court, appelle d'abord _gemini_get_creneaux puis choisis le premier créneau disponible à l'heure demandée."""
 
     try:
-        ai = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        messages = [{"role": "user", "content": question}]
-
-        # Boucle agent : Claude appelle les outils jusqu'à avoir la réponse
-        while True:
-            response = ai.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=1024,
-                system=system_prompt,
-                tools=tools,
-                messages=messages,
-            )
-
-            # Pas d'appel d'outil → réponse finale
-            if response.stop_reason == "end_turn":
-                final = next(b.text for b in response.content if hasattr(b, "text"))
-                return jsonify({"reponse": final})
-
-            # Traiter les appels d'outils
-            messages.append({"role": "assistant", "content": response.content})
-            tool_results = []
-
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-
-                name = block.name
-                args = block.input
-                logger.info(f"Claude appelle {name}({args})")
-
-                try:
-                    if name == "get_creneaux":
-                        client = _get_client()
-                        slots = client.get_creneaux(args["date"])
-                        result = {"date": args["date"], "creneaux": slots}
-                    elif name == "reserver":
-                        client = _get_client()
-                        client.get_creneaux(args["date"])
-                        msg = client.reserver(args["slot_id"], args["date"])
-                        result = {"status": "ok", "message": msg}
-                    elif name == "surveiller":
-                        date_str = args["date"]
-                        heure = str(args["heure"])
-                        for w in _watches:
-                            if w["date"] == date_str and w["heure"] == heure and not w["notified"]:
-                                result = {"status": "ok", "message": f"Surveillance déjà active pour {date_str} à {heure}h"}
-                                break
-                        else:
-                            _watches.append({"date": date_str, "heure": heure, "notified": False})
-                            result = {"status": "ok", "message": f"Surveillance activée pour {date_str} à {heure}h"}
-                    else:
-                        result = {"error": f"Outil inconnu: {name}"}
-                except Exception as e:
-                    result = {"error": str(e)}
-
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": str(result)
-                })
-
-            messages.append({"role": "user", "content": tool_results})
+        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            tools=[_gemini_get_creneaux, _gemini_reserver, _gemini_surveiller],
+            system_instruction=system_prompt,
+        )
+        chat_session = model.start_chat(enable_automatic_function_calling=True)
+        response = chat_session.send_message(question)
+        return jsonify({"reponse": response.text})
 
     except Exception as e:
         logger.error(f"Erreur /chat: {e}")
