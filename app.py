@@ -2,8 +2,8 @@ import os
 import logging
 from datetime import datetime, timedelta
 
+import re
 import requests
-import google.generativeai as genai
 from flask import Flask, jsonify, request
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -196,38 +196,57 @@ def list_surveillances():
     return jsonify({"surveillances": actives})
 
 
-def _gemini_get_creneaux(date: str) -> dict:
-    """Récupère les créneaux de tennis disponibles pour une date donnée (format JJ/MM/AAAA)."""
-    try:
-        client = _get_client()
-        slots = client.get_creneaux(date)
-        return {"date": date, "creneaux": slots}
-    except Exception as e:
-        return {"error": str(e)}
+JOURS_FR = {
+    "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
+    "vendredi": 4, "samedi": 5, "dimanche": 6,
+}
+
+def _parse_date(text: str) -> str | None:
+    """Extrait une date du texte et retourne JJ/MM/AAAA."""
+    text = text.lower()
+    today = datetime.now()
+
+    if "après-demain" in text or "apres-demain" in text or "apres demain" in text:
+        return (today + timedelta(days=2)).strftime("%d/%m/%Y")
+    if "demain" in text:
+        return (today + timedelta(days=1)).strftime("%d/%m/%Y")
+    if "aujourd" in text:
+        return today.strftime("%d/%m/%Y")
+
+    # Jour de la semaine (prochain)
+    for jour, idx in JOURS_FR.items():
+        if jour in text:
+            diff = (idx - today.weekday()) % 7 or 7
+            return (today + timedelta(days=diff)).strftime("%d/%m/%Y")
+
+    # Format JJ/MM/AAAA ou JJ/MM
+    m = re.search(r"(\d{1,2})[/\-](\d{1,2})(?:[/\-](\d{4}))?", text)
+    if m:
+        j, mo, an = m.group(1), m.group(2), m.group(3) or str(today.year)
+        return f"{int(j):02d}/{int(mo):02d}/{an}"
+
+    return None
 
 
-def _gemini_reserver(slot_id: str, date: str) -> dict:
-    """Réserve un créneau de tennis. slot_id est au format HEURE_0_COURT (ex: 9_0_4). date au format JJ/MM/AAAA."""
-    try:
-        client = _get_client()
-        client.get_creneaux(date)
-        msg = client.reserver(slot_id, date)
-        return {"status": "ok", "message": msg}
-    except Exception as e:
-        return {"error": str(e)}
+def _parse_heure(text: str) -> int | None:
+    """Extrait une heure du texte (entier)."""
+    m = re.search(r"\b(\d{1,2})\s*h", text.lower())
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\bà\s+(\d{1,2})\b", text.lower())
+    if m:
+        return int(m.group(1))
+    return None
 
 
-def _gemini_surveiller(date: str, heure: int) -> dict:
-    """Surveille un créneau et envoie une notification push quand il se libère. date au format JJ/MM/AAAA, heure est un entier (ex: 14)."""
-    try:
-        heure_str = str(heure)
-        for w in _watches:
-            if w["date"] == date and w["heure"] == heure_str and not w["notified"]:
-                return {"status": "ok", "message": f"Surveillance déjà active pour {date} à {heure}h"}
-        _watches.append({"date": date, "heure": heure_str, "notified": False})
-        return {"status": "ok", "message": f"Surveillance activée pour {date} à {heure}h"}
-    except Exception as e:
-        return {"error": str(e)}
+def _parse_action(text: str) -> str:
+    """Détecte l'intention : get_creneaux, reserver ou surveiller."""
+    t = text.lower()
+    if any(w in t for w in ["surveille", "surveiller", "alerte", "notifie", "préviens", "previens", "libère", "libere"]):
+        return "surveiller"
+    if any(w in t for w in ["réserve", "reserve", "réserver", "reserver", "book", "prend", "prends"]):
+        return "reserver"
+    return "get_creneaux"
 
 
 @app.route("/chat")
@@ -236,26 +255,58 @@ def chat():
     if not question:
         return jsonify({"error": "Parametre 'q' manquant"}), 400
 
-    today = datetime.now()
-    system_prompt = f"""Tu es un assistant qui gère les réservations de tennis pour JB au club.
-Aujourd'hui nous sommes le {today.strftime('%A %d/%m/%Y')}.
-Demain c'est le {(today + timedelta(days=1)).strftime('%d/%m/%Y')}.
+    action = _parse_action(question)
+    date_str = _parse_date(question)
+    heure = _parse_heure(question)
 
-Tu peux lister les créneaux disponibles, réserver un créneau, ou surveiller un créneau pour être notifié s'il se libère.
-Réponds toujours en français, de façon concise et naturelle.
-Pour les dates relatives comme "demain", "jeudi", etc., convertis-les en JJ/MM/AAAA.
-Si l'utilisateur veut réserver sans préciser le court, appelle d'abord _gemini_get_creneaux puis choisis le premier créneau disponible à l'heure demandée."""
+    if not date_str:
+        return jsonify({"reponse": "Je n'ai pas compris la date. Essaie : 'Réserve demain à 14h' ou 'Créneaux jeudi'."})
 
     try:
-        genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            tools=[_gemini_get_creneaux, _gemini_reserver, _gemini_surveiller],
-            system_instruction=system_prompt,
-        )
-        chat_session = model.start_chat(enable_automatic_function_calling=True)
-        response = chat_session.send_message(question)
-        return jsonify({"reponse": response.text})
+        if action == "get_creneaux":
+            tennis = _get_client()
+            slots = tennis.get_creneaux(date_str)
+            if not slots:
+                result_text = f"Aucun créneau disponible le {date_str}."
+            elif heure:
+                filtres = [s for s in slots if s["heure"] == f"{heure}h"]
+                if filtres:
+                    courts = ", ".join(s["label"] for s in filtres)
+                    result_text = f"Disponible le {date_str} à {heure}h : {courts}"
+                else:
+                    result_text = f"Aucun créneau disponible le {date_str} à {heure}h."
+            else:
+                lines = [f"Créneaux disponibles le {date_str} :"]
+                for s in slots:
+                    lines.append(f"- {s['label']}")
+                result_text = "\n".join(lines)
+
+        elif action == "reserver":
+            tennis = _get_client()
+            slots = tennis.get_creneaux(date_str)
+            if heure:
+                slots = [s for s in slots if s["heure"] == f"{heure}h"]
+            if not slots:
+                result_text = f"Aucun créneau disponible le {date_str}" + (f" à {heure}h." if heure else ".")
+            else:
+                chosen = slots[0]
+                tennis.reserver(chosen["slot_id"], date_str)
+                result_text = f"Réservation confirmée : {chosen['label']} le {date_str}."
+
+        elif action == "surveiller":
+            if not heure:
+                result_text = "Précise l'heure à surveiller. Ex : 'Surveille jeudi à 14h'"
+            else:
+                heure_str = str(heure)
+                for w in _watches:
+                    if w["date"] == date_str and w["heure"] == heure_str and not w["notified"]:
+                        result_text = f"Surveillance déjà active pour le {date_str} à {heure}h."
+                        break
+                else:
+                    _watches.append({"date": date_str, "heure": heure_str, "notified": False})
+                    result_text = f"Surveillance activée : tu recevras une notification dès qu'un court se libère le {date_str} à {heure}h."
+
+        return jsonify({"reponse": result_text})
 
     except Exception as e:
         logger.error(f"Erreur /chat: {e}")
