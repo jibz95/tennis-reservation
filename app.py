@@ -96,6 +96,12 @@ scheduler.start()
 # Endpoints
 # ------------------------------------------------------------------
 
+@app.route("/")
+def index():
+    from flask import render_template
+    return render_template("index.html")
+
+
 @app.route("/health")
 def health():
     watches_actives = [w for w in _watches if not w["notified"]]
