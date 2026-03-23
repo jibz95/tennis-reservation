@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: tennis-reservation
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    plan: free
+    envVars:
+      - key: TENNIS_LOGIN
+        sync: false
+      - key: TENNIS_PASSWORD
+        sync: false
+      - key: NTFY_TOPIC
+        sync: false
