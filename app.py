@@ -196,6 +196,7 @@ def reserver():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.reserver(slot_id, date_str)
+        _notify(f"Tennis — Réservation confirmée", f"{slot_id.replace('_0_', 'h Court ')} le {date_str}")
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502
@@ -224,6 +225,7 @@ def reserver_invitation():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.reserver_invitation(slot_id, date_str)
+        _notify(f"Tennis — Réservation (invitation) confirmée", f"{slot_id.replace('_0_', 'h Court ')} le {date_str}")
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502
@@ -317,6 +319,7 @@ def annuler():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.annuler(str(idres), str(idpro), date_str)
+        _notify(f"Tennis — Réservation annulée", f"Réservation {idres} du {date_str} annulée")
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502
