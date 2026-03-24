@@ -156,7 +156,12 @@ def creneaux():
     try:
         client = _get_client()
         slots = client.get_creneaux(date_str)
-        return jsonify({"date": date_str, "creneaux": slots})
+        # Grouper par court pour affichage rapide
+        par_court = {}
+        for s in slots:
+            nom = s["court"]
+            par_court.setdefault(nom, []).append(s["heure"])
+        return jsonify({"date": date_str, "creneaux": slots, "par_court": par_court})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 502
     except Exception as e:
