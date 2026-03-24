@@ -132,6 +132,34 @@ paths:
         "502":
           description: Erreur de réservation
 
+  /reserver_differe:
+    post:
+      operationId: reserverDiffere
+      summary: Programmer une réservation automatique dans quelques secondes (sans attendre la confirmation)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slot_id, date]
+              properties:
+                slot_id:
+                  type: string
+                  description: Identifiant du créneau (ex. 9_0_4)
+                date:
+                  type: string
+                  description: Date au format JJ/MM/AAAA
+                invitation:
+                  type: boolean
+                  description: true pour utiliser un crédit invitation
+                delai:
+                  type: integer
+                  description: Délai en secondes avant réservation (défaut 10)
+      responses:
+        "200":
+          description: Réservation programmée
+
   /reserver_invitation:
     post:
       operationId: reserverInvitation

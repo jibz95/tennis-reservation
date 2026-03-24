@@ -112,6 +112,33 @@ scheduler.add_job(_check_watches, "interval", minutes=1, id="watch_job")
 scheduler.start()
 
 
+_reservations_differees: list[dict] = []
+
+
+def _check_reservations_differees():
+    """Exécute les réservations différées dont le délai est écoulé."""
+    now = datetime.now()
+    pending = [r for r in _reservations_differees if not r["done"] and now >= r["execute_at"]]
+    for r in pending:
+        r["done"] = True
+        try:
+            client = _get_client()
+            client.get_creneaux(r["date"])
+            if r.get("invitation"):
+                client.reserver_invitation(r["slot_id"], r["date"])
+                _notify("Tennis - Reservation avec invitation", f"{r['slot_id']} le {r['date']}", tags="ticket,tennis")
+            else:
+                client.reserver(r["slot_id"], r["date"])
+                _notify("Tennis - Reservation confirmee", f"{r['slot_id']} le {r['date']}", tags="white_check_mark,tennis")
+            logger.info(f"Réservation différée réussie : {r['slot_id']} le {r['date']}")
+        except Exception as e:
+            logger.error(f"Réservation différée échouée : {e}")
+            _notify("Tennis - Echec reservation differee", str(e), tags="warning,tennis")
+
+
+scheduler.add_job(_check_reservations_differees, "interval", seconds=5, id="differe_job")
+
+
 # ------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------
@@ -195,6 +222,30 @@ def reserver():
         return jsonify({"error": str(e)}), 502
     except Exception as e:
         return jsonify({"error": f"Erreur inattendue: {e}"}), 500
+
+
+@app.route("/reserver_differe", methods=["POST"])
+def reserver_differe():
+    body = request.get_json(silent=True) or {}
+    slot_id = body.get("slot_id")
+    date_str = body.get("date")
+    invitation = bool(body.get("invitation", False))
+    delai = int(body.get("delai", 10))
+
+    if not slot_id:
+        return jsonify({"error": "Champ 'slot_id' manquant"}), 400
+    if not date_str:
+        return jsonify({"error": "Champ 'date' manquant"}), 400
+    if not _validate_date(date_str):
+        return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+
+    execute_at = datetime.now() + timedelta(seconds=delai)
+    _reservations_differees.append({
+        "slot_id": slot_id, "date": date_str,
+        "invitation": invitation, "done": False, "execute_at": execute_at,
+    })
+    type_str = "avec invitation" if invitation else "standard"
+    return jsonify({"status": "ok", "message": f"Reservation {type_str} programmee dans {delai}s pour {slot_id} le {date_str}"})
 
 
 @app.route("/reserver_invitation", methods=["GET", "POST"])
