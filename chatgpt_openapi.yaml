@@ -132,6 +132,33 @@ paths:
         "502":
           description: Erreur de réservation
 
+  /reserver_auto:
+    post:
+      operationId: reserverAuto
+      summary: Trouver le premier créneau disponible à l'heure demandée et réserver automatiquement (1 seul appel)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, heure]
+              properties:
+                date:
+                  type: string
+                  description: Date au format JJ/MM/AAAA
+                heure:
+                  type: string
+                  description: Heure souhaitée (ex. 14 ou 14h)
+                invitation:
+                  type: boolean
+                  description: true pour utiliser un crédit invitation
+      responses:
+        "200":
+          description: Réservation programmée
+        "404":
+          description: Aucun créneau disponible à cette heure
+
   /reserver_differe:
     post:
       operationId: reserverDiffere

@@ -224,6 +224,42 @@ def reserver():
         return jsonify({"error": f"Erreur inattendue: {e}"}), 500
 
 
+@app.route("/reserver_auto", methods=["POST"])
+def reserver_auto():
+    """Cherche le premier créneau disponible à l'heure demandée et réserve automatiquement."""
+    body = request.get_json(silent=True) or {}
+    date_str = body.get("date")
+    heure = str(body.get("heure", "")).replace("h", "")
+    invitation = bool(body.get("invitation", False))
+
+    if not date_str:
+        return jsonify({"error": "Champ 'date' manquant"}), 400
+    if not heure.isdigit():
+        return jsonify({"error": "Champ 'heure' manquant ou invalide (ex: 14)"}), 400
+    if not _validate_date(date_str):
+        return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+
+    try:
+        client = _get_client()
+        slots = client.get_creneaux(date_str)
+        matches = [s for s in slots if s["heure"] == f"{heure}h"]
+        if not matches:
+            # Suggérer des créneaux proches
+            autres = sorted({s["heure"] for s in slots})
+            suggestion = f" Créneaux disponibles : {', '.join(autres[:5])}" if autres else ""
+            return jsonify({"error": f"Aucun créneau disponible le {date_str} à {heure}h.{suggestion}"}), 404
+        chosen = matches[0]
+        _reservations_differees.append({
+            "slot_id": chosen["slot_id"], "date": date_str,
+            "invitation": invitation, "done": False,
+            "execute_at": datetime.now() + timedelta(seconds=2),
+        })
+        type_str = "avec invitation" if invitation else ""
+        return jsonify({"status": "ok", "message": f"Réservation {type_str} programmée : {chosen['label']} le {date_str} — exécution dans 2s"})
+    except Exception as e:
+        return jsonify({"error": f"Erreur : {e}"}), 500
+
+
 @app.route("/reserver_differe", methods=["POST"])
 def reserver_differe():
     body = request.get_json(silent=True) or {}
