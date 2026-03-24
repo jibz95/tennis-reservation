@@ -53,6 +53,7 @@ class TennisClient:
             "Accept-Language": "fr-FR,fr;q=0.9",
         })
         self._idpge_planning = None  # extrait après login depuis le planning
+        self._idpro = None           # idpro de l'utilisateur connecté (extrait après réservation)
 
     # ------------------------------------------------------------------
     # Login
@@ -231,14 +232,16 @@ class TennisClient:
                 m.group(4), m.group(5), m.group(6)
             )
             label_raw = m.group(7)
-            # Filtrer : idact=330 (réservation), mn=0 (heure pleine), idres>0
+            # Filtrer : idact=330 (réservation membre), mn=0 (heure pleine), idres>0
             if idact != "330" or mn != "0" or int(idres) <= 0:
+                continue
+            # Filtrer uniquement mes réservations si idpro connu
+            if self._idpro and idpro != self._idpro:
                 continue
             if idres in seen_idres:
                 continue
             seen_idres.add(idres)
-            import re as _re
-            label = _re.sub(r'<[^>]+>', '', label_raw).strip()
+            label = re.sub(r'<[^>]+>', '', label_raw).strip()
             court_name = COURT_NAMES.get(court, f"Court {court}")
             reservations.append({
                 "slot_id": f"{h}_0_{court}",
@@ -355,4 +358,27 @@ class TennisClient:
         if "erreur" in html3.lower() and "fiche_identification" in html3.lower():
             raise RuntimeError("Échec de la réservation — vérifier le créneau")
 
+        # Extraire et stocker l'idpro de l'utilisateur depuis le planning
+        self._extract_idpro(slot_id, date_str)
+
         return "Reservation confirmee"
+
+    def _extract_idpro(self, slot_id: str, date_str: str):
+        """Extrait l'idpro du joueur connecté depuis le planning après réservation."""
+        try:
+            date_with_day = _date_with_day(date_str)
+            timestamp = int(time.time() * 1000)
+            r = self.session.get(BASE_URL, params={
+                "idact": "328", "idses": "S0",
+                "CHAMP_SELECTEUR_JOUR": date_with_day, "_": str(timestamp),
+            }, timeout=10)
+            # Chercher le slot qu'on vient de réserver dans idg_pset
+            h, _, court = slot_id.split("_")
+            m = re.search(
+                rf'idg_pset\(Array\("{h}_0_{court}",\d+,"(\d+)",330',
+                r.text
+            )
+            if m:
+                self._idpro = m.group(1)
+        except Exception:
+            pass
