@@ -201,6 +201,9 @@ paths:
                 heure:
                   type: string
                   description: Heure souhaitée (ex. 14 ou 14h)
+                intervalle:
+                  type: integer
+                  description: Fréquence de vérification en minutes (défaut 5, min 1, max 60)
       responses:
         "200":
           description: Surveillance activée

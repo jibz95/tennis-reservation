@@ -57,22 +57,25 @@ def _notify(title: str, message: str, tags: str = "tennis"):
 
 
 def _check_watches():
-    """Tâche planifiée : vérifie les créneaux surveillés."""
-    if not _watches:
-        return
-
+    """Tâche planifiée : vérifie les créneaux surveillés (toutes les minutes, intervalle par veille)."""
     active = [w for w in _watches if not w["notified"]]
     if not active:
         return
 
-    logger.info(f"Vérification de {len(active)} surveillance(s)...")
+    now = datetime.now()
+    due = [w for w in active if (now - w.get("dernier_check", datetime.min)).total_seconds() / 60 >= w.get("intervalle", 5)]
+    if not due:
+        return
+
+    logger.info(f"Vérification de {len(due)} surveillance(s)...")
     try:
         client = _get_client()
     except Exception as e:
         logger.error(f"Échec login pour surveillance: {e}")
         return
 
-    for watch in active:
+    for watch in due:
+        watch["dernier_check"] = now
         date_str = watch["date"]
         heure = watch["heure"]
         try:
@@ -105,7 +108,7 @@ def _check_watches():
 
 # Démarrer le scheduler
 scheduler = BackgroundScheduler()
-scheduler.add_job(_check_watches, "interval", minutes=5, id="watch_job")
+scheduler.add_job(_check_watches, "interval", minutes=1, id="watch_job")
 scheduler.start()
 
 
@@ -223,10 +226,12 @@ def surveiller():
     if request.method == "GET":
         date_str = request.args.get("date")
         heure = str(request.args.get("heure", "")).replace("h", "")
+        intervalle = int(request.args.get("intervalle", 5))
     else:
         body = request.get_json(silent=True) or {}
         date_str = body.get("date")
         heure = str(body.get("heure", "")).replace("h", "")
+        intervalle = int(body.get("intervalle", 5))
 
     if not date_str:
         return jsonify({"error": "Champ 'date' manquant (format: JJ/MM/AAAA)"}), 400
@@ -234,15 +239,31 @@ def surveiller():
         return jsonify({"error": "Champ 'heure' manquant ou invalide (ex: 14)"}), 400
     if not _validate_date(date_str):
         return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+    intervalle = max(1, min(intervalle, 60))
+
+    # Vérifier si une réservation existe déjà pour cette date
+    try:
+        client = _get_client()
+        client.get_creneaux(date_str)
+        reservations = client.get_reservations(date_str)
+        if reservations:
+            res = reservations[0]
+            return jsonify({
+                "status": "reservation_existante",
+                "message": f"Tu as déjà une réservation le {date_str} : {res['label']}. Veux-tu l'annuler pour activer la veille ?",
+                "reservation": res,
+            })
+    except Exception as e:
+        logger.warning(f"Impossible de vérifier les réservations avant veille: {e}")
 
     # Éviter les doublons
     for w in _watches:
         if w["date"] == date_str and w["heure"] == heure and not w["notified"]:
             return jsonify({"status": "ok", "message": f"Surveillance deja active pour {date_str} a {heure}h"})
 
-    _watches.append({"date": date_str, "heure": heure, "notified": False})
-    logger.info(f"Surveillance ajoutee: {date_str} a {heure}h")
-    return jsonify({"status": "ok", "message": f"Surveillance activee : reservation automatique des qu'un court se libere le {date_str} a {heure}h"})
+    _watches.append({"date": date_str, "heure": heure, "notified": False, "intervalle": intervalle, "dernier_check": datetime.min})
+    logger.info(f"Surveillance ajoutee: {date_str} a {heure}h (intervalle {intervalle} min)")
+    return jsonify({"status": "ok", "message": f"Veille activee : je verifierai toutes les {intervalle} min et reserverai automatiquement le {date_str} a {heure}h des qu'un court se libere"})
 
 
 @app.route("/surveiller", methods=["DELETE"])
