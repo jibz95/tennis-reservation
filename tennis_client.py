@@ -196,6 +196,58 @@ class TennisClient:
 
         return creneaux
 
+    def get_planning(self, date_str: str) -> dict:
+        """Retourne la grille complète (libres + occupés) pour la date donnée."""
+        date_with_day = _date_with_day(date_str)
+        timestamp = int(time.time() * 1000)
+
+        r = self.session.get(BASE_URL, params={
+            "idact": "328", "idses": "S0",
+            "CHAMP_SELECTEUR_JOUR": date_with_day, "_": str(timestamp),
+        }, timeout=10)
+        r.raise_for_status()
+        js = r.text
+
+        if not self._idpge_planning:
+            match = re.search(r'(210-\w+)', js)
+            if match:
+                self._idpge_planning = match.group(1)
+
+        # Plages ouvertes par court
+        free_ranges: dict[str, tuple[int, int]] = {}
+        for m in re.finditer(r'idg_lset\("(\d+)_0_(\d+)","(\d+)_0_\d+"', js):
+            start_h, court, end_h = int(m.group(1)), m.group(2), int(m.group(3))
+            free_ranges[court] = (start_h, end_h)
+
+        # Créneaux occupés
+        occupied: set[str] = set()
+        for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)"', js):
+            h, mn, court = m.group(1), m.group(2), m.group(3)
+            if mn == "0":
+                occupied.add(f"{h}_0_{court}")
+
+        # Construire la grille heure × court
+        court_order = ["1", "2", "3", "4", "5", "6", "9", "8"]
+        all_hours = sorted({h for start, end in free_ranges.values() for h in range(start, end)})
+        courts_actifs = [c for c in court_order if c in free_ranges]
+
+        grille = []
+        for h in all_hours:
+            row = {"heure": f"{h}h"}
+            for court in courts_actifs:
+                start, end = free_ranges[court]
+                if start <= h < end:
+                    row[COURT_NAMES.get(court, f"Court {court}")] = "libre" if f"{h}_0_{court}" not in occupied else "occupe"
+                else:
+                    row[COURT_NAMES.get(court, f"Court {court}")] = "-"
+            grille.append(row)
+
+        return {
+            "date": date_str,
+            "courts": [COURT_NAMES.get(c, f"Court {c}") for c in courts_actifs],
+            "grille": grille,
+        }
+
     # ------------------------------------------------------------------
     # Mes réservations
     # ------------------------------------------------------------------

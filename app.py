@@ -119,6 +119,23 @@ def health():
     return jsonify({"status": "ok", "surveillances_actives": len(watches_actives)})
 
 
+@app.route("/planning")
+def planning():
+    date_str = request.args.get("date")
+    if not date_str:
+        return jsonify({"error": "Parametre 'date' manquant (format: JJ/MM/AAAA)"}), 400
+    if not _validate_date(date_str):
+        return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+    try:
+        client = _get_client()
+        data = client.get_planning(date_str)
+        return jsonify(data)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"error": f"Erreur inattendue: {e}"}), 500
+
+
 @app.route("/creneaux")
 def creneaux():
     date_str = request.args.get("date")

@@ -1,4 +1,4 @@
-openapi: 3.0.0
+openapi: 3.1.0
 info:
   title: Tennis Reservation API
   description: API pour gérer les réservations de courts de tennis au TCM (Tennis Club du Ménil)
@@ -6,6 +6,36 @@ info:
 servers:
   - url: https://tennis-reservation-ct8h.onrender.com
 paths:
+  /planning:
+    get:
+      operationId: getPlanning
+      summary: Grille complète des courts (libres et occupés) pour une date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Date au format JJ/MM/AAAA
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Grille heure x court
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  courts:
+                    type: array
+                    items:
+                      type: string
+                  grille:
+                    type: array
+                    items:
+                      type: object
+
   /creneaux:
     get:
       operationId: getCreneaux
