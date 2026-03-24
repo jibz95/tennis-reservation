@@ -36,7 +36,7 @@ def _validate_date(date_str: str) -> bool:
         return False
 
 
-def _notify(title: str, message: str):
+def _send_ntfy(title: str, message: str, tags: str = "tennis"):
     topic = os.environ.get("NTFY_TOPIC")
     if not topic:
         logger.warning("NTFY_TOPIC non defini, notification ignoree")
@@ -45,32 +45,15 @@ def _notify(title: str, message: str):
         requests.post(
             f"https://ntfy.sh/{topic}",
             data=message.encode("utf-8"),
-            headers={"Title": title, "Priority": "high", "Tags": "tennis"},
+            headers={"Title": title, "Priority": "high", "Tags": tags},
             timeout=10,
         )
     except Exception as e:
         logger.error(f"Erreur ntfy: {e}")
 
 
-def _send_whatsapp(title: str, message: str):
-    phone = os.environ.get("WHATSAPP_PHONE")
-    apikey = os.environ.get("WHATSAPP_APIKEY")
-    if not phone or not apikey:
-        return
-    try:
-        text = f"{title} — {message}"
-        requests.get(
-            "https://api.callmebot.com/whatsapp.php",
-            params={"phone": phone, "text": text, "apikey": apikey},
-            timeout=10,
-        )
-    except Exception as e:
-        logger.error(f"Erreur WhatsApp: {e}")
-
-
-def _notify(title: str, message: str):
-    _notify(title, message)
-    _send_whatsapp(title, message)
+def _notify(title: str, message: str, tags: str = "tennis"):
+    _send_ntfy(title, message, tags)
 
 
 def _check_watches():
@@ -102,14 +85,16 @@ def _check_watches():
                     client.reserver(chosen["slot_id"], date_str)
                     logger.info(f"Réservation automatique réussie : {chosen['label']}")
                     _notify(
-                        title=f"Tennis - Réservé automatiquement le {date_str} à {heure}h",
-                        message=f"Réservation confirmée : {chosen['label']}",
+                        "Tennis - Creneau libere et reserve !",
+                        f"{chosen['label']} le {date_str} a {heure}h",
+                        tags="bell,tennis",
                     )
                 except Exception as e_res:
                     logger.warning(f"Réservation automatique échouée ({e_res}) — notification simple")
                     _notify(
-                        title=f"Tennis - Créneau dispo le {date_str} à {heure}h",
-                        message=f"Disponible : {chosen['label']} (réservation manuelle nécessaire)",
+                        "Tennis - Creneau disponible",
+                        f"{chosen['label']} le {date_str} a {heure}h (reservation manuelle necessaire)",
+                        tags="warning,tennis",
                     )
                 watch["notified"] = True
             else:
@@ -196,7 +181,7 @@ def reserver():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.reserver(slot_id, date_str)
-        _notify(f"Tennis — Réservation confirmée", f"{slot_id.replace('_0_', 'h Court ')} le {date_str}")
+        _notify("Tennis - Reservation confirmee", f"{slot_id.replace('_0_', 'h Court ')} le {date_str}", tags="white_check_mark,tennis")
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502
@@ -225,7 +210,7 @@ def reserver_invitation():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.reserver_invitation(slot_id, date_str)
-        _notify(f"Tennis — Réservation (invitation) confirmée", f"{slot_id.replace('_0_', 'h Court ')} le {date_str}")
+        _notify("Tennis - Reservation avec invitation", f"{slot_id.replace('_0_', 'h Court ')} le {date_str}", tags="ticket,tennis")
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502
@@ -319,7 +304,7 @@ def annuler():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.annuler(str(idres), str(idpro), date_str)
-        _notify(f"Tennis — Réservation annulée", f"Réservation {idres} du {date_str} annulée")
+        _notify("Tennis - Reservation annulee", f"Reservation {idres} du {date_str} annulee", tags="x,tennis")
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502
