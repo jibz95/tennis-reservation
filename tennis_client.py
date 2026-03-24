@@ -174,18 +174,18 @@ class TennisClient:
             start_h, court, end_h = int(m.group(1)), m.group(2), int(m.group(3))
             free_ranges[court] = (start_h, end_h)
 
-        # Créneaux occupés : idg_pset(Array("H_M_C",...))
+        # Créneaux occupés : idg_pset(Array("H_M_C",...)) — toutes les demi-heures
         occupied: set[str] = set()
         for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)"', js):
             h, mn, court = m.group(1), m.group(2), m.group(3)
-            if mn == "0":
-                occupied.add(f"{h}_0_{court}")
+            occupied.add(f"{h}_{mn}_{court}")
 
         creneaux = []
         for court, (start_h, end_h) in sorted(free_ranges.items(), key=lambda x: int(x[0])):
             for h in range(start_h, end_h):
                 slot_id = f"{h}_0_{court}"
-                if slot_id not in occupied:
+                # Un créneau 1h à H est réservable seulement si H:00 ET H:30 sont libres
+                if slot_id not in occupied and f"{h}_30_{court}" not in occupied:
                     court_name = COURT_NAMES.get(court, f"Court {court}")
                     creneaux.append({
                         "slot_id": slot_id,
@@ -219,12 +219,11 @@ class TennisClient:
             start_h, court, end_h = int(m.group(1)), m.group(2), int(m.group(3))
             free_ranges[court] = (start_h, end_h)
 
-        # Créneaux occupés
+        # Créneaux occupés — toutes les demi-heures
         occupied: set[str] = set()
         for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)"', js):
             h, mn, court = m.group(1), m.group(2), m.group(3)
-            if mn == "0":
-                occupied.add(f"{h}_0_{court}")
+            occupied.add(f"{h}_{mn}_{court}")
 
         # Construire la grille court × heure
         court_order = ["1", "2", "3", "4", "5", "6", "9", "8"]
@@ -241,7 +240,8 @@ class TennisClient:
             planning[nom] = {}
             for h in all_hours:
                 if start <= h < end:
-                    planning[nom][f"{h}h"] = "libre" if f"{h}_0_{court}" not in occupied else "occupe"
+                    libre = f"{h}_0_{court}" not in occupied and f"{h}_30_{court}" not in occupied
+                    planning[nom][f"{h}h"] = "libre" if libre else "occupe"
                 else:
                     planning[nom][f"{h}h"] = "-"
 
