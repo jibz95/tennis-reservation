@@ -226,26 +226,49 @@ class TennisClient:
             if mn == "0":
                 occupied.add(f"{h}_0_{court}")
 
-        # Construire la grille heure × court
+        # Construire la grille court × heure
         court_order = ["1", "2", "3", "4", "5", "6", "9", "8"]
+        court_labels = {"1": "1TB", "2": "2TB", "3": "3TB", "4": "4TB",
+                        "5": "5TB", "6": "6TB", "9": "7DUR", "8": "8DUR"}
         all_hours = sorted({h for start, end in free_ranges.values() for h in range(start, end)})
         courts_actifs = [c for c in court_order if c in free_ranges]
 
-        grille = []
-        for h in all_hours:
-            row = {"heure": f"{h}h"}
-            for court in courts_actifs:
-                start, end = free_ranges[court]
+        # Structure par court (courts en lignes, heures en colonnes)
+        planning = {}
+        for court in courts_actifs:
+            nom = court_labels.get(court, f"C{court}")
+            start, end = free_ranges[court]
+            planning[nom] = {}
+            for h in all_hours:
                 if start <= h < end:
-                    row[COURT_NAMES.get(court, f"Court {court}")] = "libre" if f"{h}_0_{court}" not in occupied else "occupe"
+                    planning[nom][f"{h}h"] = "libre" if f"{h}_0_{court}" not in occupied else "occupe"
                 else:
-                    row[COURT_NAMES.get(court, f"Court {court}")] = "-"
-            grille.append(row)
+                    planning[nom][f"{h}h"] = "-"
+
+        # Tableau Markdown pré-formaté (courts en lignes, heures en colonnes)
+        heures = [f"{h}h" for h in all_hours]
+        header = "| Court | " + " | ".join(heures) + " |"
+        separator = "|:------|" + "|:---:|" * len(heures)
+        lines = [header, separator]
+        for court in courts_actifs:
+            nom = court_labels.get(court, f"C{court}")
+            cells = []
+            for h in all_hours:
+                val = planning[nom][f"{h}h"]
+                if val == "libre":
+                    cells.append("🟢")
+                elif val == "occupe":
+                    cells.append("⚫")
+                else:
+                    cells.append("➖")
+            lines.append(f"| {nom:<5} | " + " | ".join(cells) + " |")
+        tableau = "\n".join(lines)
 
         return {
             "date": date_str,
-            "courts": [COURT_NAMES.get(c, f"Court {c}") for c in courts_actifs],
-            "grille": grille,
+            "heures": heures,
+            "planning": planning,
+            "tableau": tableau,
         }
 
     # ------------------------------------------------------------------
