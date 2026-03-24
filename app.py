@@ -73,15 +73,24 @@ def _check_watches():
             slots = client.get_creneaux(date_str)
             matches = [s for s in slots if s["heure"] == f"{heure}h"]
             if matches:
-                courts = ", ".join(s["label"] for s in matches)
-                logger.info(f"Créneau disponible! {courts}")
-                _send_ntfy(
-                    title=f"Tennis - Creneau dispo le {date_str} a {heure}h",
-                    message=f"Disponible : {courts}",
-                )
+                chosen = matches[0]
+                logger.info(f"Créneau disponible : {chosen['label']} — tentative de réservation automatique...")
+                try:
+                    client.reserver(chosen["slot_id"], date_str)
+                    logger.info(f"Réservation automatique réussie : {chosen['label']}")
+                    _send_ntfy(
+                        title=f"Tennis - Réservé automatiquement le {date_str} à {heure}h",
+                        message=f"Réservation confirmée : {chosen['label']}",
+                    )
+                except Exception as e_res:
+                    logger.warning(f"Réservation automatique échouée ({e_res}) — notification simple")
+                    _send_ntfy(
+                        title=f"Tennis - Créneau dispo le {date_str} à {heure}h",
+                        message=f"Disponible : {chosen['label']} (réservation manuelle nécessaire)",
+                    )
                 watch["notified"] = True
             else:
-                logger.info(f"Pas de creneau a {heure}h le {date_str}")
+                logger.info(f"Pas de créneau à {heure}h le {date_str}")
         except Exception as e:
             logger.error(f"Erreur surveillance {date_str} {heure}h: {e}")
 
@@ -178,7 +187,7 @@ def surveiller():
 
     _watches.append({"date": date_str, "heure": heure, "notified": False})
     logger.info(f"Surveillance ajoutee: {date_str} a {heure}h")
-    return jsonify({"status": "ok", "message": f"Surveillance activee pour {date_str} a {heure}h"})
+    return jsonify({"status": "ok", "message": f"Surveillance activee : reservation automatique des qu'un court se libere le {date_str} a {heure}h"})
 
 
 @app.route("/surveiller", methods=["DELETE"])
@@ -376,7 +385,7 @@ def chat():
                         break
                 else:
                     _watches.append({"date": date_str, "heure": heure_str, "notified": False})
-                    result_text = f"Surveillance activée : tu recevras une notification dès qu'un court se libère le {date_str} à {heure}h."
+                    result_text = f"Surveillance activée : je réserverai automatiquement dès qu'un court se libère le {date_str} à {heure}h."
 
         return jsonify({"reponse": result_text})
 
