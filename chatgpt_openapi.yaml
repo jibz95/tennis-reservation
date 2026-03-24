@@ -4,7 +4,7 @@ info:
   description: API pour gérer les réservations de courts de tennis au TCM (Tennis Club du Ménil)
   version: 1.0.0
 servers:
-  - url: https://tennis-reservation.onrender.com
+  - url: https://tennis-reservation-ct8h.onrender.com
 paths:
   /creneaux:
     get:
