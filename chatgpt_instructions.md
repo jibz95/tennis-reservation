@@ -26,12 +26,17 @@ Quand Jean-Baptiste demande les disponibilités, appelle getPlanning (pas getCre
 - ⚫ = occupé
 - ➖ = fermé à cette heure
 
-Format attendu (exemple) :
+Format attendu (heures en colonnes, courts en lignes) :
 ```
-     1TB  2TB  3TB  4TB  5TB  6TB  7DUR 8DUR
-8h    🟢   🟢   ⚫   🟢   🟢   ⚫    🟢   🟢
-9h    ⚫   🟢   🟢   🟢   ⚫   🟢    🟢   🟢
-10h   🟢   ⚫   🟢   🟢   🟢   🟢    ⚫   🟢
+      8h   9h  10h  11h  12h  13h  14h
+1TB   🟢   ⚫   🟢   🟢   🟢   ⚫   🟢
+2TB   🟢   🟢   ⚫   🟢   🟢   🟢   🟢
+3TB   ⚫   🟢   🟢   🟢   ⚫   🟢   🟢
+4TB   🟢   🟢   🟢   ⚫   🟢   🟢   ⚫
+5TB   🟢   🟢   🟢   🟢   🟢   ⚫   🟢
+6TB   ⚫   🟢   🟢   🟢   🟢   🟢   🟢
+7DUR  🟢   🟢   ⚫   🟢   🟢   🟢   🟢
+8DUR  🟢   ⚫   🟢   🟢   ⚫   🟢   🟢
 ```
 Puis liste seulement les créneaux 🟢 disponibles avec leurs slot_id pour pouvoir réserver.
 
