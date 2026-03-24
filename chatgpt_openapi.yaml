@@ -1,0 +1,216 @@
+openapi: 3.0.0
+info:
+  title: Tennis Reservation API
+  description: API pour gérer les réservations de courts de tennis au TCM (Tennis Club du Ménil)
+  version: 1.0.0
+servers:
+  - url: https://tennis-reservation.onrender.com
+paths:
+  /creneaux:
+    get:
+      operationId: getCreneaux
+      summary: Lister les créneaux disponibles pour une date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Date au format JJ/MM/AAAA (ex. 25/03/2026)
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Liste des créneaux disponibles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  creneaux:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        slot_id:
+                          type: string
+                        label:
+                          type: string
+                        heure:
+                          type: string
+                        court:
+                          type: string
+
+  /reservations:
+    get:
+      operationId: getReservations
+      summary: Lister les réservations actives de Jean-Baptiste pour une date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Date au format JJ/MM/AAAA
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Liste des réservations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                  reservations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        slot_id:
+                          type: string
+                        idres:
+                          type: string
+                        idpro:
+                          type: string
+                        label:
+                          type: string
+                        heure:
+                          type: string
+
+  /reserver:
+    post:
+      operationId: reserver
+      summary: Réserver un créneau (avec partenaire désigné automatiquement)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slot_id, date]
+              properties:
+                slot_id:
+                  type: string
+                  description: Identifiant du créneau (ex. 9_0_4)
+                date:
+                  type: string
+                  description: Date au format JJ/MM/AAAA
+      responses:
+        "200":
+          description: Réservation confirmée
+        "502":
+          description: Erreur de réservation
+
+  /reserver_invitation:
+    post:
+      operationId: reserverInvitation
+      summary: Réserver un créneau en utilisant un crédit invitation (sans partenaire nommé)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slot_id, date]
+              properties:
+                slot_id:
+                  type: string
+                  description: Identifiant du créneau (ex. 9_0_4)
+                date:
+                  type: string
+                  description: Date au format JJ/MM/AAAA
+      responses:
+        "200":
+          description: Réservation avec invitation confirmée
+        "502":
+          description: Erreur (invitations non autorisées pour ce créneau, ou crédit insuffisant)
+
+  /annuler:
+    post:
+      operationId: annuler
+      summary: Annuler une réservation existante
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idres, idpro, date]
+              properties:
+                idres:
+                  type: string
+                  description: Identifiant de la réservation
+                idpro:
+                  type: string
+                  description: Identifiant du membre (toujours 9165 pour Jean-Baptiste)
+                date:
+                  type: string
+                  description: Date de la réservation au format JJ/MM/AAAA
+      responses:
+        "200":
+          description: Annulation confirmée
+        "502":
+          description: Erreur d'annulation
+
+  /surveiller:
+    post:
+      operationId: surveillerCreneau
+      summary: Activer une veille automatique sur un créneau — réserve automatiquement dès qu'il se libère
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, heure]
+              properties:
+                date:
+                  type: string
+                  description: Date au format JJ/MM/AAAA
+                heure:
+                  type: string
+                  description: Heure souhaitée (ex. 14 ou 14h)
+      responses:
+        "200":
+          description: Surveillance activée
+    delete:
+      operationId: annulerSurveillance
+      summary: Annuler une veille active
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, heure]
+              properties:
+                date:
+                  type: string
+                heure:
+                  type: string
+      responses:
+        "200":
+          description: Surveillance annulée
+
+  /surveillances:
+    get:
+      operationId: listSurveillances
+      summary: Lister toutes les veilles actives
+      responses:
+        "200":
+          description: Liste des veilles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  surveillances:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                        heure:
+                          type: string

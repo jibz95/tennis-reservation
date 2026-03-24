@@ -5,11 +5,13 @@ from datetime import datetime, timedelta
 import re
 import requests
 from flask import Flask, jsonify, request
+from flask_cors import CORS
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from tennis_client import TennisClient
 
 app = Flask(__name__)
+CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -156,6 +158,34 @@ def reserver():
         client = _get_client()
         client.get_creneaux(date_str)
         message = client.reserver(slot_id, date_str)
+        return jsonify({"status": "ok", "message": message})
+    except (RuntimeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"error": f"Erreur inattendue: {e}"}), 500
+
+
+@app.route("/reserver_invitation", methods=["GET", "POST"])
+def reserver_invitation():
+    if request.method == "GET":
+        slot_id = request.args.get("slot_id")
+        date_str = request.args.get("date")
+    else:
+        body = request.get_json(silent=True) or {}
+        slot_id = body.get("slot_id")
+        date_str = body.get("date")
+
+    if not slot_id:
+        return jsonify({"error": "Champ 'slot_id' manquant"}), 400
+    if not date_str:
+        return jsonify({"error": "Champ 'date' manquant (format: JJ/MM/AAAA)"}), 400
+    if not _validate_date(date_str):
+        return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
+
+    try:
+        client = _get_client()
+        client.get_creneaux(date_str)
+        message = client.reserver_invitation(slot_id, date_str)
         return jsonify({"status": "ok", "message": message})
     except (RuntimeError, ValueError) as e:
         return jsonify({"error": str(e)}), 502

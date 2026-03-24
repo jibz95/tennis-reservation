@@ -363,6 +363,60 @@ class TennisClient:
 
         return "Reservation confirmee"
 
+    def reserver_invitation(self, slot_id: str, date_str: str) -> str:
+        """Réserve le créneau en utilisant un crédit d'invitation (sans partenaire nommé)."""
+        parts = slot_id.split("_")
+        if len(parts) != 3:
+            raise ValueError(f"slot_id invalide: {slot_id}")
+        heure, _, court = parts[0], parts[1], parts[2]
+        date_with_day = _date_with_day(date_str)
+
+        if not self._idpge_planning:
+            raise RuntimeError("idpge_planning non disponible — relancer login + get_creneaux")
+
+        # Étape 1 : Ouvrir la fiche (idact=336)
+        r1 = self.session.post(BASE_URL, data={
+            "idact": "336",
+            "idpge": self._idpge_planning,
+            "IDOBJ": slot_id,
+            "idses": "S0",
+            "idcrt": court,
+            "pw": "24",
+            "dj": "2",
+            "CHAMP_SELECTEUR_JEU": "1",
+            "ID_TABLEAU": f"1|{CLUB_ID}|1",
+            "CHAMP_SELECTEUR_JOUR": date_with_day,
+            "nc": "30",
+        }, timeout=10)
+        r1.raise_for_status()
+        html1 = r1.text
+
+        match = re.search(r'["\']?(330-\w+)["\']?', html1)
+        if not match:
+            raise RuntimeError("idpge 330-xxx introuvable dans la fiche de réservation")
+        idpge_330 = match.group(1)
+
+        # Étape 2 : Confirmer l'invitation directement (idact=337, CHAMP_TYPE_1=3)
+        # Le JS du select: value='3' → idact=337 directement, sans passer par idact=332
+        r3 = self.session.post(BASE_URL, data={
+            "idact": "337",
+            "idpge": idpge_330,
+            "IDOBJ": "-1",
+            "CHAMP_TYPE_1": "3",
+            "idses": "S0",
+            "b_i": "0",
+        }, timeout=10)
+        r3.raise_for_status()
+        html3 = r3.text
+
+        if "invitations ne sont pas autoris" in html3.lower():
+            raise RuntimeError("Les invitations ne sont pas autorisées pour ce créneau horaire")
+        if "erreur" in html3.lower() and "fiche_identification" in html3.lower():
+            raise RuntimeError("Échec de la réservation avec invitation")
+
+        self._extract_idpro(slot_id, date_str)
+        return "Reservation avec invitation confirmee"
+
     def _extract_idpro(self, slot_id: str, date_str: str):
         """Extrait l'idpro du joueur connecté depuis le planning après réservation."""
         try:
