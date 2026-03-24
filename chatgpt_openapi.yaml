@@ -155,7 +155,7 @@ paths:
                   description: true pour utiliser un crédit invitation
                 delai:
                   type: integer
-                  description: Délai en secondes avant réservation (défaut 10)
+                  description: Délai en secondes avant réservation (défaut 2)
       responses:
         "200":
           description: Réservation programmée

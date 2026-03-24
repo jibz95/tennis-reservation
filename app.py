@@ -230,7 +230,7 @@ def reserver_differe():
     slot_id = body.get("slot_id")
     date_str = body.get("date")
     invitation = bool(body.get("invitation", False))
-    delai = int(body.get("delai", 10))
+    delai = int(body.get("delai", 2))
 
     if not slot_id:
         return jsonify({"error": "Champ 'slot_id' manquant"}), 400
