@@ -36,7 +36,7 @@ def _validate_date(date_str: str) -> bool:
         return False
 
 
-def _send_ntfy(title: str, message: str):
+def _notify(title: str, message: str):
     topic = os.environ.get("NTFY_TOPIC")
     if not topic:
         logger.warning("NTFY_TOPIC non defini, notification ignoree")
@@ -50,6 +50,27 @@ def _send_ntfy(title: str, message: str):
         )
     except Exception as e:
         logger.error(f"Erreur ntfy: {e}")
+
+
+def _send_whatsapp(title: str, message: str):
+    phone = os.environ.get("WHATSAPP_PHONE")
+    apikey = os.environ.get("WHATSAPP_APIKEY")
+    if not phone or not apikey:
+        return
+    try:
+        text = f"{title} — {message}"
+        requests.get(
+            "https://api.callmebot.com/whatsapp.php",
+            params={"phone": phone, "text": text, "apikey": apikey},
+            timeout=10,
+        )
+    except Exception as e:
+        logger.error(f"Erreur WhatsApp: {e}")
+
+
+def _notify(title: str, message: str):
+    _notify(title, message)
+    _send_whatsapp(title, message)
 
 
 def _check_watches():
@@ -80,13 +101,13 @@ def _check_watches():
                 try:
                     client.reserver(chosen["slot_id"], date_str)
                     logger.info(f"Réservation automatique réussie : {chosen['label']}")
-                    _send_ntfy(
+                    _notify(
                         title=f"Tennis - Réservé automatiquement le {date_str} à {heure}h",
                         message=f"Réservation confirmée : {chosen['label']}",
                     )
                 except Exception as e_res:
                     logger.warning(f"Réservation automatique échouée ({e_res}) — notification simple")
-                    _send_ntfy(
+                    _notify(
                         title=f"Tennis - Créneau dispo le {date_str} à {heure}h",
                         message=f"Disponible : {chosen['label']} (réservation manuelle nécessaire)",
                     )
