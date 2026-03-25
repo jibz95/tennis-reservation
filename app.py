@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import logging
 from datetime import datetime, timedelta
 
@@ -15,11 +16,36 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ------------------------------------------------------------------
-# Surveillance : liste des watches en mémoire
-# Chaque watch : {"date": "JJ/MM/AAAA", "heure": "14", "notified": False}
-# ------------------------------------------------------------------
-_watches: list[dict] = []
+DB_PATH = os.path.join(os.path.dirname(__file__), "tennis.db")
+
+
+def _get_db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db():
+    with _get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS watches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            heure TEXT NOT NULL,
+            intervalle INTEGER DEFAULT 5,
+            notified INTEGER DEFAULT 0,
+            dernier_check TEXT DEFAULT '0001-01-01T00:00:00'
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS reservations_differees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slot_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            invitation INTEGER DEFAULT 0,
+            done INTEGER DEFAULT 0,
+            execute_at TEXT NOT NULL
+        )""")
+
+
+_init_db()
 
 
 def _get_client() -> TennisClient:
@@ -63,12 +89,13 @@ def _notify(title: str, message: str, tags: str = "tennis"):
 
 def _check_watches():
     """Tâche planifiée : vérifie les créneaux surveillés (toutes les minutes, intervalle par veille)."""
-    active = [w for w in _watches if not w["notified"]]
+    with _get_db() as conn:
+        active = conn.execute("SELECT * FROM watches WHERE notified=0").fetchall()
     if not active:
         return
 
     now = datetime.now()
-    due = [w for w in active if (now - w.get("dernier_check", datetime.min)).total_seconds() / 60 >= w.get("intervalle", 5)]
+    due = [w for w in active if (now - datetime.fromisoformat(w["dernier_check"])).total_seconds() / 60 >= w["intervalle"]]
     if not due:
         return
 
@@ -80,9 +107,10 @@ def _check_watches():
         return
 
     for watch in due:
-        watch["dernier_check"] = now
         date_str = watch["date"]
         heure = watch["heure"]
+        with _get_db() as conn:
+            conn.execute("UPDATE watches SET dernier_check=? WHERE id=?", (now.isoformat(), watch["id"]))
         try:
             slots = client.get_creneaux(date_str)
             matches = [s for s in slots if s["heure"] == f"{heure}h"]
@@ -90,7 +118,6 @@ def _check_watches():
                 chosen = matches[0]
                 logger.info(f"Créneau disponible : {chosen['label']} — tentative de réservation automatique...")
                 try:
-                    # Annuler toute réservation existante avant de réserver
                     try:
                         existing = client.get_reservations(date_str)
                         for res in existing:
@@ -101,19 +128,12 @@ def _check_watches():
 
                     client.reserver(chosen["slot_id"], date_str)
                     logger.info(f"Réservation automatique réussie : {chosen['label']}")
-                    _notify(
-                        "Tennis - Creneau libere et reserve !",
-                        f"{chosen['label']} le {date_str} a {heure}h",
-                        tags="bell,tennis",
-                    )
+                    _notify("Tennis - Creneau libere et reserve !", f"{chosen['label']} le {date_str} a {heure}h", tags="bell,tennis")
                 except Exception as e_res:
                     logger.warning(f"Réservation automatique échouée ({e_res}) — notification simple")
-                    _notify(
-                        "Tennis - Creneau disponible",
-                        f"{chosen['label']} le {date_str} a {heure}h (reservation manuelle necessaire)",
-                        tags="warning,tennis",
-                    )
-                watch["notified"] = True
+                    _notify("Tennis - Creneau disponible", f"{chosen['label']} le {date_str} a {heure}h (reservation manuelle necessaire)", tags="warning,tennis")
+                with _get_db() as conn:
+                    conn.execute("UPDATE watches SET notified=1 WHERE id=?", (watch["id"],))
             else:
                 logger.info(f"Pas de créneau à {heure}h le {date_str}")
         except Exception as e:
@@ -126,19 +146,21 @@ scheduler.add_job(_check_watches, "interval", minutes=1, id="watch_job")
 scheduler.start()
 
 
-_reservations_differees: list[dict] = []
-
-
 def _check_reservations_differees():
     """Exécute les réservations différées dont le délai est écoulé."""
     now = datetime.now()
-    pending = [r for r in _reservations_differees if not r["done"] and now >= r["execute_at"]]
+    with _get_db() as conn:
+        pending = conn.execute(
+            "SELECT * FROM reservations_differees WHERE done=0 AND execute_at<=?",
+            (now.isoformat(),)
+        ).fetchall()
     for r in pending:
-        r["done"] = True
+        with _get_db() as conn:
+            conn.execute("UPDATE reservations_differees SET done=1 WHERE id=?", (r["id"],))
         try:
             client = _get_client()
             client.get_creneaux(r["date"])
-            if r.get("invitation"):
+            if r["invitation"]:
                 client.reserver_invitation(r["slot_id"], r["date"])
                 _notify("Tennis - Reservation avec invitation", f"{r['slot_id']} le {r['date']}", tags="ticket,tennis")
             else:
@@ -165,8 +187,9 @@ def index():
 
 @app.route("/health")
 def health():
-    watches_actives = [w for w in _watches if not w["notified"]]
-    return jsonify({"status": "ok", "surveillances_actives": len(watches_actives)})
+    with _get_db() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM watches WHERE notified=0").fetchone()[0]
+    return jsonify({"status": "ok", "surveillances_actives": count})
 
 
 @app.route("/planning")
@@ -294,13 +317,15 @@ def changer_reservation_differee():
     if not ancien_slot or not nouveau_slot or not date_str:
         return jsonify({"error": "Champs 'ancien_slot_id', 'nouveau_slot_id' et 'date' requis"}), 400
 
-    for r in _reservations_differees:
-        if r["slot_id"] == ancien_slot and r["date"] == date_str and not r["done"]:
-            r["slot_id"] = nouveau_slot
-            r["execute_at"] = datetime.now() + timedelta(seconds=5)
-            return jsonify({"status": "ok", "message": f"Réservation mise à jour : {nouveau_slot} le {date_str} — exécution dans 5s"})
-
-    return jsonify({"error": "Aucune réservation différée en attente trouvée"}), 404
+    execute_at = (datetime.now() + timedelta(seconds=5)).isoformat()
+    with _get_db() as conn:
+        cur = conn.execute(
+            "UPDATE reservations_differees SET slot_id=?, execute_at=? WHERE slot_id=? AND date=? AND done=0",
+            (nouveau_slot, execute_at, ancien_slot, date_str)
+        )
+        if cur.rowcount == 0:
+            return jsonify({"error": "Aucune réservation différée en attente trouvée"}), 404
+    return jsonify({"status": "ok", "message": f"Réservation mise à jour : {nouveau_slot} le {date_str} — exécution dans 5s"})
 
 
 @app.route("/reserver_differe", methods=["POST"])
@@ -318,11 +343,12 @@ def reserver_differe():
     if not _validate_date(date_str):
         return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
 
-    execute_at = datetime.now() + timedelta(seconds=delai)
-    _reservations_differees.append({
-        "slot_id": slot_id, "date": date_str,
-        "invitation": invitation, "done": False, "execute_at": execute_at,
-    })
+    execute_at = (datetime.now() + timedelta(seconds=delai)).isoformat()
+    with _get_db() as conn:
+        conn.execute(
+            "INSERT INTO reservations_differees (slot_id, date, invitation, done, execute_at) VALUES (?,?,?,0,?)",
+            (slot_id, date_str, int(invitation), execute_at)
+        )
     type_str = "avec invitation" if invitation else "standard"
     return jsonify({"status": "ok", "message": f"Reservation {type_str} programmee dans {delai}s pour {slot_id} le {date_str}"})
 
@@ -376,12 +402,17 @@ def surveiller():
         return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
     intervalle = max(1, min(intervalle, 60))
 
-    # Éviter les doublons
-    for w in _watches:
-        if w["date"] == date_str and w["heure"] == heure and not w["notified"]:
+    with _get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM watches WHERE date=? AND heure=? AND notified=0",
+            (date_str, heure)
+        ).fetchone()
+        if existing:
             return jsonify({"status": "ok", "message": f"Surveillance deja active pour {date_str} a {heure}h"})
-
-    _watches.append({"date": date_str, "heure": heure, "notified": False, "intervalle": intervalle, "dernier_check": datetime.min})
+        conn.execute(
+            "INSERT INTO watches (date, heure, intervalle, notified, dernier_check) VALUES (?,?,?,0,'0001-01-01T00:00:00')",
+            (date_str, heure, intervalle)
+        )
     logger.info(f"Surveillance ajoutee: {date_str} a {heure}h (intervalle {intervalle} min)")
     try:
         dt = datetime.strptime(date_str, "%d/%m/%Y")
@@ -400,12 +431,12 @@ def annuler_surveillance():
     date_str = body.get("date")
     heure = str(body.get("heure", "")).replace("h", "")
 
-    removed = 0
-    for w in _watches:
-        if w["date"] == date_str and w["heure"] == heure:
-            w["notified"] = True  # marquer comme terminé
-            removed += 1
-
+    with _get_db() as conn:
+        cur = conn.execute(
+            "UPDATE watches SET notified=1 WHERE date=? AND heure=? AND notified=0",
+            (date_str, heure)
+        )
+        removed = cur.rowcount
     return jsonify({"status": "ok", "message": f"{removed} surveillance(s) annulee(s)"})
 
 
@@ -463,17 +494,21 @@ def annuler():
 
 @app.route("/surveillances")
 def list_surveillances():
-    actives = [w for w in _watches if not w["notified"]]
-    return jsonify({"surveillances": actives})
+    with _get_db() as conn:
+        rows = conn.execute("SELECT * FROM watches WHERE notified=0").fetchall()
+    return jsonify({"surveillances": [dict(r) for r in rows]})
 
 
 @app.route("/declencher_veille")
 def declencher_veille():
     """Déclenche manuellement la vérification des veilles (debug)."""
-    avant = len([w for w in _watches if not w["notified"]])
+    with _get_db() as conn:
+        avant = conn.execute("SELECT COUNT(*) FROM watches WHERE notified=0").fetchone()[0]
     _check_watches()
-    apres = len([w for w in _watches if not w["notified"]])
-    return jsonify({"veilles_avant": avant, "veilles_apres": apres, "watches": _watches})
+    with _get_db() as conn:
+        apres = conn.execute("SELECT COUNT(*) FROM watches WHERE notified=0").fetchone()[0]
+        watches = [dict(r) for r in conn.execute("SELECT * FROM watches").fetchall()]
+    return jsonify({"veilles_avant": avant, "veilles_apres": apres, "watches": watches})
 
 
 JOURS_FR = {
