@@ -374,6 +374,42 @@ class TennisClient:
             })
         return reservations
 
+    def get_planning_brut(self, date_str: str) -> list[dict]:
+        """Retourne tous les créneaux occupés sans filtre idact — pour debug."""
+        date_with_day = _date_with_day(date_str)
+        timestamp = int(time.time() * 1000)
+        r = self.session.get(BASE_URL, params={
+            "idact": "328", "idses": "S0",
+            "CHAMP_SELECTEUR_JOUR": date_with_day, "_": str(timestamp),
+        }, timeout=10)
+        r.raise_for_status()
+        js = r.text
+        seen = set()
+        result = []
+        for m in re.finditer(
+            r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+),[^,]+,[^,]+,[^,]+,"([^"]*)"',
+            js
+        ):
+            h, mn, court, idres, idpro, idact = (
+                m.group(1), m.group(2), m.group(3),
+                m.group(4), m.group(5), m.group(6)
+            )
+            label_raw = m.group(7)
+            if mn != "0" or int(idres) <= 0:
+                continue
+            if idres in seen:
+                continue
+            seen.add(idres)
+            label_clean = re.sub(r'<[^>]+>', '', label_raw).strip()
+            result.append({
+                "heure": f"{h}h",
+                "court": COURT_NAMES.get(court, f"Court {court}"),
+                "idact": idact,
+                "idpro": idpro,
+                "label": label_clean,
+            })
+        return result
+
     # ------------------------------------------------------------------
     # Annulation
     # ------------------------------------------------------------------

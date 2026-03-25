@@ -219,6 +219,23 @@ def planning():
         return jsonify({"error": f"Erreur inattendue: {e}"}), 500
 
 
+@app.route("/planning_brut")
+def planning_brut():
+    date_str = request.args.get("date")
+    if not date_str:
+        return jsonify({"error": "Parametre 'date' manquant"}), 400
+    try:
+        client = _get_client()
+        data = client.get_planning_brut(date_str)
+        # Grouper par idact pour voir les types
+        par_idact: dict[str, list] = {}
+        for r in data:
+            par_idact.setdefault(r["idact"], []).append(r)
+        return jsonify({"total": len(data), "par_idact": par_idact})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/joueurs_frequents")
 def joueurs_frequents():
     """Scanne les 14 prochains jours et retourne les joueurs les plus présents."""
