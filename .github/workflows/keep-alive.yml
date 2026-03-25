@@ -1,0 +1,15 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'  # toutes les 5 minutes
+  workflow_dispatch:        # déclenchement manuel possible
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" \
+            https://tennis-reservation-ct8h.onrender.com/health
