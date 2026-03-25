@@ -226,10 +226,9 @@ def reserver():
 
 @app.route("/reserver_auto", methods=["POST"])
 def reserver_auto():
-    """Cherche les créneaux disponibles, programme le premier avec 30s de délai, retourne les options."""
+    """Trouve le premier créneau disponible à l'heure demandée et réserve immédiatement."""
     body = request.get_json(silent=True) or {}
     date_str = body.get("date")
-    # Normaliser l'heure : "15h", "15:00", "15h30", "15" → "15"
     heure = re.sub(r'\D.*', '', str(body.get("heure", ""))).strip()
     invitation = bool(body.get("invitation", False))
     court_prefere = str(body.get("court", "")).strip()
@@ -250,22 +249,22 @@ def reserver_auto():
             suggestion = f" Créneaux disponibles : {', '.join(autres[:5])}" if autres else ""
             return jsonify({"error": f"Aucun créneau disponible le {date_str} à {heure}h.{suggestion}"}), 404
 
-        # Choisir le court demandé si précisé, sinon le premier disponible
         chosen = next((s for s in matches if court_prefere.lower() in s["label"].lower()), matches[0])
+
+        if invitation:
+            client.reserver_invitation(chosen["slot_id"], date_str)
+            _notify("Tennis - Reservation avec invitation", f"{chosen['label']} le {date_str}", tags="ticket,tennis")
+        else:
+            client.reserver(chosen["slot_id"], date_str)
+            _notify("Tennis - Reservation confirmee", f"{chosen['label']} le {date_str}", tags="white_check_mark,tennis")
+
         autres_courts = [s["label"] for s in matches if s["slot_id"] != chosen["slot_id"]]
-
-        entry = {
-            "slot_id": chosen["slot_id"], "date": date_str,
-            "invitation": invitation, "done": False,
-            "execute_at": datetime.now() + timedelta(seconds=30),
-        }
-        _reservations_differees.append(entry)
-
-        type_str = " (invitation)" if invitation else ""
-        msg = f"Court {chosen['label']}{type_str} le {date_str} à {heure}h — réservation automatique dans 30s."
+        msg = f"Réservé : {chosen['label']} le {date_str} à {heure}h."
         if autres_courts:
-            msg += f" Autres courts disponibles : {', '.join(autres_courts)}."
-        return jsonify({"status": "pending", "slot_id": chosen["slot_id"], "court": chosen["label"], "autres": autres_courts, "message": msg})
+            msg += f" (autres courts disponibles : {', '.join(autres_courts)})"
+        return jsonify({"status": "ok", "message": msg, "slot_id": chosen["slot_id"], "court": chosen["label"]})
+    except (RuntimeError, ValueError) as e:
+        return jsonify({"error": str(e)}), 502
     except Exception as e:
         return jsonify({"error": f"Erreur : {e}"}), 500
 
