@@ -384,31 +384,32 @@ class TennisClient:
         }, timeout=10)
         r.raise_for_status()
         js = r.text
-        seen = set()
-        result = []
-        for m in re.finditer(
-            r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+),[^,]+,[^,]+,[^,]+,"([^"]*)"',
-            js
-        ):
+        # Première passe : tous les slots occupés (regex simple)
+        simple: dict[str, dict] = {}
+        for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+)', js):
             h, mn, court, idres, idpro, idact = (
                 m.group(1), m.group(2), m.group(3),
                 m.group(4), m.group(5), m.group(6)
             )
-            label_raw = m.group(7)
             if mn != "0":
                 continue
-            if idres in seen:
+            key = f"{h}_{court}"
+            simple[key] = {"heure": f"{h}h", "court": COURT_NAMES.get(court, f"Court {court}"),
+                           "idact": idact, "idpro": idpro, "label": ""}
+
+        # Deuxième passe : extraire les labels pour les entrées complètes
+        for m in re.finditer(
+            r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+),[^,]+,[^,]+,[^,]+,"([^"]*)"',
+            js
+        ):
+            h, mn, court = m.group(1), m.group(2), m.group(3)
+            if mn != "0":
                 continue
-            seen.add(idres)
-            label_clean = re.sub(r'<[^>]+>', '', label_raw).strip()
-            result.append({
-                "heure": f"{h}h",
-                "court": COURT_NAMES.get(court, f"Court {court}"),
-                "idact": idact,
-                "idpro": idpro,
-                "label": label_clean,
-            })
-        return result
+            key = f"{h}_{court}"
+            if key in simple:
+                simple[key]["label"] = re.sub(r'<[^>]+>', '', m.group(7)).strip()
+
+        return list(simple.values())
 
     # ------------------------------------------------------------------
     # Annulation
