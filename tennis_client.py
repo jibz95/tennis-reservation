@@ -384,16 +384,19 @@ class TennisClient:
         }, timeout=10)
         r.raise_for_status()
         js = r.text
-        # Première passe : tous les slots occupés (regex simple)
+        # Première passe : tous les slots occupés (regex minimale — h, mn, court + args bruts)
         simple: dict[str, dict] = {}
-        for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+)', js):
-            h, mn, court, idres, idpro, idact = (
-                m.group(1), m.group(2), m.group(3),
-                m.group(4), m.group(5), m.group(6)
-            )
+        for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)"(,[^)]+)?\)', js):
+            h, mn, court, args_raw = m.group(1), m.group(2), m.group(3), m.group(4) or ""
             if mn != "0":
                 continue
             key = f"{h}_{court}"
+            # Tenter d'extraire idres, idpro, idact depuis les args
+            nums = re.findall(r'"(\d+)"|,(\d+)', args_raw)
+            flat = [a or b for a, b in nums]
+            idres  = flat[0] if len(flat) > 0 else "0"
+            idpro  = flat[1] if len(flat) > 1 else "0"
+            idact  = flat[2] if len(flat) > 2 else "?"
             simple[key] = {"heure": f"{h}h", "court": COURT_NAMES.get(court, f"Court {court}"),
                            "idact": idact, "idpro": idpro, "label": ""}
 
