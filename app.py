@@ -219,6 +219,35 @@ def planning():
         return jsonify({"error": f"Erreur inattendue: {e}"}), 500
 
 
+@app.route("/joueurs_frequents")
+def joueurs_frequents():
+    """Scanne les 14 prochains jours et retourne les joueurs les plus présents."""
+    try:
+        client = _get_client()
+        compteur: dict[str, dict] = {}
+        today = datetime.now()
+        for delta in range(0, 14):
+            date_str = (today + timedelta(days=delta)).strftime("%d/%m/%Y")
+            try:
+                reservations = client.get_planning(date_str)
+                for r in reservations:
+                    nom = r["nom"]
+                    if not nom or nom.upper() == "JECHAP":
+                        continue
+                    if nom not in compteur:
+                        compteur[nom] = {"nom": nom, "nb_reservations": 0, "prochains_creneaux": []}
+                    compteur[nom]["nb_reservations"] += 1
+                    compteur[nom]["prochains_creneaux"].append(f"{r['date']} {r['heure']} {r['court']}")
+            except Exception:
+                continue
+        joueurs = sorted(compteur.values(), key=lambda x: x["nb_reservations"], reverse=True)
+        return jsonify({"joueurs": joueurs})
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"error": f"Erreur inattendue: {e}"}), 500
+
+
 @app.route("/creneaux")
 def creneaux():
     date_str = request.args.get("date")

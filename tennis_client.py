@@ -329,6 +329,51 @@ class TennisClient:
 
         return reservations
 
+    def get_planning(self, date_str: str) -> list[dict]:
+        """Retourne toutes les réservations du planning pour une date (tous membres)."""
+        date_with_day = _date_with_day(date_str)
+        timestamp = int(time.time() * 1000)
+        r = self.session.get(BASE_URL, params={
+            "idact": "328", "idses": "S0",
+            "CHAMP_SELECTEUR_JOUR": date_with_day, "_": str(timestamp),
+        }, timeout=10)
+        r.raise_for_status()
+        js = r.text
+
+        if not self._idpge_planning:
+            match = re.search(r'(210-\w+)', js)
+            if match:
+                self._idpge_planning = match.group(1)
+
+        reservations = []
+        seen_idres = set()
+        for m in re.finditer(
+            r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+),[^,]+,[^,]+,[^,]+,"([^"]*)"',
+            js
+        ):
+            h, mn, court, idres, idpro, idact = (
+                m.group(1), m.group(2), m.group(3),
+                m.group(4), m.group(5), m.group(6)
+            )
+            label_raw = m.group(7)
+            if idact != "330" or mn != "0" or int(idres) <= 0:
+                continue
+            if idres in seen_idres:
+                continue
+            seen_idres.add(idres)
+            label_clean = re.sub(r'<[^>]+>', '', label_raw).strip()
+            # Extraire le nom : "NOM Prenom - ..." → "NOM Prenom"
+            nom = label_clean.split(" - ")[0].strip() if " - " in label_clean else label_clean
+            court_name = COURT_NAMES.get(court, f"Court {court}")
+            reservations.append({
+                "date": date_str,
+                "heure": f"{h}h",
+                "court": court_name,
+                "idpro": idpro,
+                "nom": nom,
+            })
+        return reservations
+
     # ------------------------------------------------------------------
     # Annulation
     # ------------------------------------------------------------------
