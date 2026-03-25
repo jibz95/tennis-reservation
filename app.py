@@ -130,8 +130,24 @@ def _check_watches():
                     logger.info(f"Réservation automatique réussie : {chosen['label']}")
                     _notify("Tennis - Creneau libere et reserve !", f"{chosen['label']} le {date_str} a {heure}h", tags="bell,tennis")
                 except Exception as e_res:
-                    logger.warning(f"Réservation automatique échouée ({e_res}) — notification simple")
-                    _notify("Tennis - Creneau disponible", f"{chosen['label']} le {date_str} a {heure}h (reservation manuelle necessaire)", tags="warning,tennis")
+                    logger.warning(f"Réservation automatique échouée ({e_res}) — recherche réservation bloquante")
+                    blocking_date = None
+                    try:
+                        today = datetime.now()
+                        for delta in range(1, 15):
+                            d = (today + timedelta(days=delta)).strftime("%d/%m/%Y")
+                            if d == date_str:
+                                continue
+                            existing_other = client.get_reservations(d)
+                            if existing_other:
+                                blocking_date = d
+                                break
+                    except Exception:
+                        pass
+                    if blocking_date:
+                        _notify("Tennis - Creneau disponible", f"{chosen['label']} le {date_str} a {heure}h — tu as deja une reservation le {blocking_date}, annule-la pour que je puisse reserver", tags="warning,tennis")
+                    else:
+                        _notify("Tennis - Creneau disponible", f"{chosen['label']} le {date_str} a {heure}h (reservation manuelle necessaire)", tags="warning,tennis")
                 with _get_db() as conn:
                     conn.execute("UPDATE watches SET notified=1 WHERE id=?", (watch["id"],))
             else:
