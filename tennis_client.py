@@ -53,7 +53,7 @@ class TennisClient:
             "Accept-Language": "fr-FR,fr;q=0.9",
         })
         self._idpge_planning = None  # extrait après login depuis le planning
-        self._idpro = None           # idpro de l'utilisateur connecté (extrait après réservation)
+        self._idpro = "9165"         # idpro de Jean-Baptiste (connu, confirmé par le club)
 
     # ------------------------------------------------------------------
     # Login
