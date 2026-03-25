@@ -378,6 +378,14 @@ def surveiller():
 
     _watches.append({"date": date_str, "heure": heure, "notified": False, "intervalle": intervalle, "dernier_check": datetime.min})
     logger.info(f"Surveillance ajoutee: {date_str} a {heure}h (intervalle {intervalle} min)")
+    try:
+        dt = datetime.strptime(date_str, "%d/%m/%Y")
+        jours_fr = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
+        jour_nom = jours_fr[dt.weekday()]
+        notif_msg = f"{jour_nom} {date_str} de {heure}h a {int(heure)+1}h — verification toutes les {intervalle} min"
+    except Exception:
+        notif_msg = f"{date_str} a {heure}h — verification toutes les {intervalle} min"
+    _notify("Tennis - Veille activee 👀", notif_msg, tags="eyes,tennis")
     return jsonify({"status": "ok", "message": f"Veille activee : je verifierai toutes les {intervalle} min et reserverai automatiquement le {date_str} a {heure}h des qu'un court se libere"})
 
 
