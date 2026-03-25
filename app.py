@@ -454,6 +454,15 @@ def list_surveillances():
     return jsonify({"surveillances": actives})
 
 
+@app.route("/declencher_veille")
+def declencher_veille():
+    """Déclenche manuellement la vérification des veilles (debug)."""
+    avant = len([w for w in _watches if not w["notified"]])
+    _check_watches()
+    apres = len([w for w in _watches if not w["notified"]])
+    return jsonify({"veilles_avant": avant, "veilles_apres": apres, "watches": _watches})
+
+
 JOURS_FR = {
     "lundi": 0, "mardi": 1, "mercredi": 2, "jeudi": 3,
     "vendredi": 4, "samedi": 5, "dimanche": 6,
