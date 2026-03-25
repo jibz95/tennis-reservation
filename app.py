@@ -229,7 +229,8 @@ def reserver_auto():
     """Cherche les créneaux disponibles, programme le premier avec 30s de délai, retourne les options."""
     body = request.get_json(silent=True) or {}
     date_str = body.get("date")
-    heure = str(body.get("heure", "")).replace("h", "")
+    # Normaliser l'heure : "15h", "15:00", "15h30", "15" → "15"
+    heure = re.sub(r'\D.*', '', str(body.get("heure", ""))).strip()
     invitation = bool(body.get("invitation", False))
     court_prefere = str(body.get("court", "")).strip()
 
@@ -351,7 +352,7 @@ def surveiller():
     else:
         body = request.get_json(silent=True) or {}
         date_str = body.get("date")
-        heure = str(body.get("heure", "")).replace("h", "")
+        heure = re.sub(r'\D.*', '', str(body.get("heure", ""))).strip()
         intervalle = int(body.get("intervalle", 5))
 
     if not date_str:
