@@ -45,7 +45,12 @@ def _send_ntfy(title: str, message: str, tags: str = "tennis"):
         requests.post(
             f"https://ntfy.sh/{topic}",
             data=message.encode("utf-8"),
-            headers={"Title": title, "Priority": "high", "Tags": tags},
+            headers={
+                "Title": title,
+                "Priority": "high",
+                "Tags": tags,
+                "Content-Type": "text/plain; charset=utf-8",
+            },
             timeout=10,
         )
     except Exception as e:
