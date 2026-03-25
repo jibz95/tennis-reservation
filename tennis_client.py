@@ -384,35 +384,60 @@ class TennisClient:
         }, timeout=10)
         r.raise_for_status()
         js = r.text
-        # Première passe : tous les slots occupés (regex minimale — h, mn, court + args bruts)
-        simple: dict[str, dict] = {}
-        for m in re.finditer(r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)"(,[^)]+)?\)', js):
-            h, mn, court, args_raw = m.group(1), m.group(2), m.group(3), m.group(4) or ""
-            if mn != "0":
-                continue
-            key = f"{h}_{court}"
-            # Tenter d'extraire idres, idpro, idact depuis les args
-            nums = re.findall(r'"(\d+)"|,(\d+)', args_raw)
-            flat = [a or b for a, b in nums]
-            idres  = flat[0] if len(flat) > 0 else "0"
-            idpro  = flat[1] if len(flat) > 1 else "0"
-            idact  = flat[2] if len(flat) > 2 else "?"
-            simple[key] = {"heure": f"{h}h", "court": COURT_NAMES.get(court, f"Court {court}"),
-                           "idact": idact, "idpro": idpro, "label": ""}
+        result: dict[str, dict] = {}
 
-        # Deuxième passe : extraire les labels pour les entrées complètes
+        # Passe 1 : réservations membres via idg_pset (idact=330)
         for m in re.finditer(
             r'idg_pset\(Array\("(\d+)_(\d+)_(\d+)",(\d+),"(\d+)",(\d+),[^,]+,[^,]+,[^,]+,"([^"]*)"',
             js
         ):
-            h, mn, court = m.group(1), m.group(2), m.group(3)
+            h, mn, court, idres, idpro, idact = (
+                m.group(1), m.group(2), m.group(3),
+                m.group(4), m.group(5), m.group(6)
+            )
             if mn != "0":
                 continue
             key = f"{h}_{court}"
-            if key in simple:
-                simple[key]["label"] = re.sub(r'<[^>]+>', '', m.group(7)).strip()
+            label_clean = re.sub(r'<[^>]+>', '', m.group(7)).strip()
+            nom = label_clean.split(" - ")[0].strip() if " - " in label_clean else label_clean
+            result[key] = {
+                "heure": f"{h}h",
+                "court": COURT_NAMES.get(court, f"Court {court}"),
+                "idact": idact,
+                "type": "reservation",
+                "label": nom,
+            }
 
-        return list(simple.values())
+        # Passe 2 : cours particuliers et maintenances via <p id="H_0_C" ...>
+        for m in re.finditer(r'<p\s+id="(\d+)_0_(\d+)"([^>]*)>(.*?)</p>', js, re.DOTALL):
+            h, court, attrs, content = m.group(1), m.group(2), m.group(3), m.group(4)
+            key = f"{h}_{court}"
+            if key in result:
+                continue
+            title_m = re.search(r'title="([^"]*)"', attrs)
+            title = title_m.group(1) if title_m else ""
+            label_clean = re.sub(r'<[^>]+>', ' ', content)
+            label_clean = re.sub(r'\s+', ' ', label_clean).strip()
+            title_lower = title.lower()
+            if "maintenance" in title_lower or "maintenance" in label_clean.lower():
+                slot_type = "maintenance"
+            elif "cours particulier" in title_lower or "cours particulier" in label_clean.lower():
+                slot_type = "cours_particulier"
+                # Extraire le nom du prof depuis le titre : "Cours Particulier - Djillali"
+                parts = title.split(" - ", 1)
+                if len(parts) > 1 and parts[1].strip():
+                    label_clean = parts[1].strip()
+            else:
+                slot_type = "occupe"
+            result[key] = {
+                "heure": f"{h}h",
+                "court": COURT_NAMES.get(court, f"Court {court}"),
+                "idact": None,
+                "type": slot_type,
+                "label": label_clean,
+            }
+
+        return list(result.values())
 
     # ------------------------------------------------------------------
     # Annulation
