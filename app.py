@@ -226,11 +226,12 @@ def reserver():
 
 @app.route("/reserver_auto", methods=["POST"])
 def reserver_auto():
-    """Cherche le premier créneau disponible à l'heure demandée et réserve automatiquement."""
+    """Cherche les créneaux disponibles, programme le premier avec 30s de délai, retourne les options."""
     body = request.get_json(silent=True) or {}
     date_str = body.get("date")
     heure = str(body.get("heure", "")).replace("h", "")
     invitation = bool(body.get("invitation", False))
+    court_prefere = str(body.get("court", "")).strip()
 
     if not date_str:
         return jsonify({"error": "Champ 'date' manquant"}), 400
@@ -244,20 +245,48 @@ def reserver_auto():
         slots = client.get_creneaux(date_str)
         matches = [s for s in slots if s["heure"] == f"{heure}h"]
         if not matches:
-            # Suggérer des créneaux proches
             autres = sorted({s["heure"] for s in slots})
             suggestion = f" Créneaux disponibles : {', '.join(autres[:5])}" if autres else ""
             return jsonify({"error": f"Aucun créneau disponible le {date_str} à {heure}h.{suggestion}"}), 404
-        chosen = matches[0]
-        _reservations_differees.append({
+
+        # Choisir le court demandé si précisé, sinon le premier disponible
+        chosen = next((s for s in matches if court_prefere.lower() in s["label"].lower()), matches[0])
+        autres_courts = [s["label"] for s in matches if s["slot_id"] != chosen["slot_id"]]
+
+        entry = {
             "slot_id": chosen["slot_id"], "date": date_str,
             "invitation": invitation, "done": False,
-            "execute_at": datetime.now() + timedelta(seconds=2),
-        })
-        type_str = "avec invitation" if invitation else ""
-        return jsonify({"status": "ok", "message": f"Réservation {type_str} programmée : {chosen['label']} le {date_str} — exécution dans 2s"})
+            "execute_at": datetime.now() + timedelta(seconds=30),
+        }
+        _reservations_differees.append(entry)
+
+        type_str = " (invitation)" if invitation else ""
+        msg = f"Court {chosen['label']}{type_str} le {date_str} à {heure}h — réservation automatique dans 30s."
+        if autres_courts:
+            msg += f" Autres courts disponibles : {', '.join(autres_courts)}."
+        return jsonify({"status": "pending", "slot_id": chosen["slot_id"], "court": chosen["label"], "autres": autres_courts, "message": msg})
     except Exception as e:
         return jsonify({"error": f"Erreur : {e}"}), 500
+
+
+@app.route("/changer_reservation_differee", methods=["POST"])
+def changer_reservation_differee():
+    """Change le court d'une réservation différée en attente."""
+    body = request.get_json(silent=True) or {}
+    ancien_slot = body.get("ancien_slot_id")
+    nouveau_slot = body.get("nouveau_slot_id")
+    date_str = body.get("date")
+
+    if not ancien_slot or not nouveau_slot or not date_str:
+        return jsonify({"error": "Champs 'ancien_slot_id', 'nouveau_slot_id' et 'date' requis"}), 400
+
+    for r in _reservations_differees:
+        if r["slot_id"] == ancien_slot and r["date"] == date_str and not r["done"]:
+            r["slot_id"] = nouveau_slot
+            r["execute_at"] = datetime.now() + timedelta(seconds=5)
+            return jsonify({"status": "ok", "message": f"Réservation mise à jour : {nouveau_slot} le {date_str} — exécution dans 5s"})
+
+    return jsonify({"error": "Aucune réservation différée en attente trouvée"}), 404
 
 
 @app.route("/reserver_differe", methods=["POST"])
