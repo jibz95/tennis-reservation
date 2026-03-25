@@ -31,7 +31,7 @@ def _init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             heure TEXT NOT NULL,
-            intervalle INTEGER DEFAULT 5,
+            intervalle INTEGER DEFAULT 60,
             notified INTEGER DEFAULT 0,
             dernier_check TEXT DEFAULT '0001-01-01T00:00:00'
         )""")
@@ -95,7 +95,7 @@ def _check_watches():
         return
 
     now = datetime.now()
-    due = [w for w in active if (now - datetime.fromisoformat(w["dernier_check"])).total_seconds() / 60 >= w["intervalle"]]
+    due = [w for w in active if (now - datetime.fromisoformat(w["dernier_check"])).total_seconds() >= w["intervalle"]]
     if not due:
         return
 
@@ -142,7 +142,7 @@ def _check_watches():
 
 # Démarrer le scheduler
 scheduler = BackgroundScheduler()
-scheduler.add_job(_check_watches, "interval", minutes=1, id="watch_job")
+scheduler.add_job(_check_watches, "interval", seconds=30, id="watch_job")
 scheduler.start()
 
 
@@ -381,12 +381,12 @@ def surveiller():
     if request.method == "GET":
         date_str = request.args.get("date")
         heure = str(request.args.get("heure", "")).replace("h", "")
-        intervalle = int(request.args.get("intervalle", 5))
+        intervalle = int(request.args.get("intervalle", 60))
     else:
         body = request.get_json(silent=True) or {}
         date_str = body.get("date")
         heure = re.sub(r'\D.*', '', str(body.get("heure", ""))).strip()
-        intervalle = int(body.get("intervalle", 5))
+        intervalle = int(body.get("intervalle", 60))
 
     if not date_str:
         return jsonify({"error": "Champ 'date' manquant (format: JJ/MM/AAAA)"}), 400
@@ -394,7 +394,7 @@ def surveiller():
         return jsonify({"error": "Champ 'heure' manquant ou invalide (ex: 14)"}), 400
     if not _validate_date(date_str):
         return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
-    intervalle = max(1, min(intervalle, 60))
+    intervalle = max(30, min(intervalle, 3600))
 
     with _get_db() as conn:
         existing = conn.execute(
@@ -412,11 +412,11 @@ def surveiller():
         dt = datetime.strptime(date_str, "%d/%m/%Y")
         jours_fr = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"]
         jour_nom = jours_fr[dt.weekday()]
-        notif_msg = f"{jour_nom} {date_str} de {heure}h a {int(heure)+1}h — verification toutes les {intervalle} min"
+        notif_msg = f"{jour_nom} {date_str} de {heure}h a {int(heure)+1}h — verification toutes les {intervalle}s"
     except Exception:
-        notif_msg = f"{date_str} a {heure}h — verification toutes les {intervalle} min"
+        notif_msg = f"{date_str} a {heure}h — verification toutes les {intervalle}s"
     _notify("Tennis - Veille activee 👀", notif_msg, tags="eyes,tennis")
-    return jsonify({"status": "ok", "message": f"Veille activee : je verifierai toutes les {intervalle} min et reserverai automatiquement le {date_str} a {heure}h des qu'un court se libere"})
+    return jsonify({"status": "ok", "message": f"Veille activee : je verifierai toutes les {intervalle}s et reserverai automatiquement le {date_str} a {heure}h des qu'un court se libere"})
 
 
 @app.route("/surveiller", methods=["DELETE"])
