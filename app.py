@@ -85,6 +85,15 @@ def _check_watches():
                 chosen = matches[0]
                 logger.info(f"Créneau disponible : {chosen['label']} — tentative de réservation automatique...")
                 try:
+                    # Annuler toute réservation existante avant de réserver
+                    try:
+                        existing = client.get_reservations(date_str)
+                        for res in existing:
+                            logger.info(f"Annulation réservation existante {res['idres']} avant veille")
+                            client.annuler(res["idres"], res["idpro"], date_str)
+                    except Exception as e_annul:
+                        logger.warning(f"Impossible d'annuler la réservation existante : {e_annul}")
+
                     client.reserver(chosen["slot_id"], date_str)
                     logger.info(f"Réservation automatique réussie : {chosen['label']}")
                     _notify(
@@ -361,21 +370,6 @@ def surveiller():
     if not _validate_date(date_str):
         return jsonify({"error": f"Format de date invalide: '{date_str}'"}), 400
     intervalle = max(1, min(intervalle, 60))
-
-    # Vérifier si une réservation existe déjà pour cette date
-    try:
-        client = _get_client()
-        client.get_creneaux(date_str)
-        reservations = client.get_reservations(date_str)
-        if reservations:
-            res = reservations[0]
-            return jsonify({
-                "status": "reservation_existante",
-                "message": f"Tu as déjà une réservation le {date_str} : {res['label']}. Veux-tu l'annuler pour activer la veille ?",
-                "reservation": res,
-            })
-    except Exception as e:
-        logger.warning(f"Impossible de vérifier les réservations avant veille: {e}")
 
     # Éviter les doublons
     for w in _watches:
