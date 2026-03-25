@@ -415,7 +415,7 @@ def surveiller():
         notif_msg = f"{jour_nom} {date_str} de {heure}h a {int(heure)+1}h — verification toutes les {intervalle}s"
     except Exception:
         notif_msg = f"{date_str} a {heure}h — verification toutes les {intervalle}s"
-    _notify("Tennis - Veille activee 👀", notif_msg, tags="eyes,tennis")
+    _notify("Tennis - Veille activee", notif_msg, tags="eyes,tennis")
     return jsonify({"status": "ok", "message": f"Veille activee : je verifierai toutes les {intervalle}s et reserverai automatiquement le {date_str} a {heure}h des qu'un court se libere"})
 
 
