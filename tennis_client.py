@@ -395,7 +395,7 @@ class TennisClient:
                 m.group(4), m.group(5), m.group(6)
             )
             label_raw = m.group(7)
-            if mn != "0" or int(idres) <= 0:
+            if mn != "0":
                 continue
             if idres in seen:
                 continue
